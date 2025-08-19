@@ -1,0 +1,25 @@
+package types
+
+type PolicyHeader struct {
+	HashAlgo  string `json:"hashType"`
+	HashValue string `json:"hash"`
+}
+
+// PolicyRequest represents the JSON payload sent by the client
+type PolicyBody struct {
+	Target       string   `json:"target"`       // e.g. "my-deployment"
+	Namespace    string   `json:"namespace"`    // e.g. "default"
+	Annotation   string   `json:"annotation"`   // e.g. "my-annotation"
+	Commands     []string `json:"commands"`     // e.g. ["echo 'hello'"]
+	Image        string   `json:"image"`        // e.g. "nginx:latest"
+	IsDeployment bool     `json:"isDeployment"` // true if the target is a deployment
+	Deny         bool     `json:"deny"`         // true if the policy is a deny policy
+	Nonce        string   `json:"nonce"`        // Unique identifier for the request to prevent replay attacks
+	HashValue    string   `json:"hash"`         // Hash over the request body for integrity verification
+	HashAlgo     string   `json:"hashType"`     // Type of hash used (e.g., "SHA256")
+}
+
+type PolicyRequest struct {
+	Header PolicyHeader
+	Body   PolicyBody
+}

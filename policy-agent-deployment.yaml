@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: policy-agent
+  template:
+    metadata:
+      labels:
+        app: policy-agent
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/yourname/my-policy-agent # <- Dein Image
+          ports:
+            - containerPort: 8443
+          volumeMounts:
+            - mountPath: "/certs"
+              name: certs
+              readOnly: true
+          args: []
+      volumes:
+        - name: certs
+          secret:
+            secretName: policy-agent-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-agent
+spec:
+  selector:
+    app: policy-agent
+  ports:
+    - protocol: TCP
+      port: 443 # ← Der Port, den Clients verwenden
+      targetPort: 8443 # ← Der Port im Container
+  type: ClusterIP # oder NodePort / LoadBalancer / ExternalName je nach Zugriff

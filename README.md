@@ -123,6 +123,12 @@ curl -k -X POST https://policy-agent:8443/patch \
 
 3. Server löscht Nonce nach erfolgreicher Validierung → Replay unmöglich.
 
+## Database
+
+`sudo docker run -d --name redis -p 6379:6379 redis:7`
+`sudo docker logs -f redis`
+if redis db exited: `sudo docker start redis`
+
 ## Logging
 
 - [ ] Secure Audit Logging
@@ -256,7 +262,7 @@ X-Hash-Value: abcd
 
 ## Calculate Hash of Body in Terminal
 
-`sha256sum body.json`
+`jq -c . body.json | sha256sum`
 
 ## Postman
 

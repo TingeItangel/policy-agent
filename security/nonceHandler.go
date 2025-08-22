@@ -2,7 +2,7 @@ package security
 
 import (
 	"fmt"
-	redis "policy-agent/policy-agent/database"
+	redis "policy-agent/database"
 
 	"github.com/google/uuid"
 )

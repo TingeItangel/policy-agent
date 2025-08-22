@@ -38,6 +38,7 @@ func InitRedis(addr, password string, db int) error {
 * return: Flag for success and error message
  */
 func SaveNonce(nonce string) (bool, string) {
+	// TODO: Encrypt with tee key before saving
 	if rdb == nil {
 		return false, "redis client not initialized (call InitRedis first)"
 	}
@@ -59,6 +60,7 @@ func SaveNonce(nonce string) (bool, string) {
 * return: Nonce value, TTL and error message
  */
 func GetNonce(nonce string) (string, time.Duration, error) {
+	// TODO: Decrypt with tee key before returning
 	if rdb == nil {
 		return "", 0, fmt.Errorf("redis client not initialized (call InitRedis first)")
 	}
@@ -92,6 +94,7 @@ func DeleteNonce(nonce string) error {
 	}
 
 	// Delete the nonce from Redis
+	// TODO Do i have to encrypt first, to find correct nonce?
 	err := rdb.Del(ctx, nonce).Err()
 	if err != nil {
 		return fmt.Errorf("failed to delete nonce %s: %w", nonce, err)

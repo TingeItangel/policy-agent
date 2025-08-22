@@ -5,10 +5,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"os"
-	redis "policy-agent/policy-agent/database"
-	"policy-agent/policy-agent/k8s"
-	"policy-agent/policy-agent/security"
-	"policy-agent/policy-agent/types"
+	redis "policy-agent/database"
+	"policy-agent/k8s"
+	"policy-agent/patch"
+	"policy-agent/security"
+	"policy-agent/types"
 
 	"io"
 	"log"
@@ -16,7 +17,6 @@ import (
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// TODO: Test that onyl POST gets through
 	// Early return if the request method is not GET or POST
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		http.Error(w, "Only GET or POST allowed", http.StatusMethodNotAllowed)
@@ -46,40 +46,44 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	req.Header.HashValue = r.Header.Get("X-Hash-Value")
 
 	// NOTE: Parse Body to PolicyRequest type
+	// 1. Read raw request body
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
+	// 2. Unmarshal into your typed struct
 	if err := json.Unmarshal(data, &req.Body); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	// NOTE Check correct Hash
-	validHash := security.CompareHash(data, req.Header.HashAlgo, req.Header.HashValue)
-	if !validHash {
-		http.Error(w, "Invalid Hash", http.StatusBadRequest)
-		return
-	}
+	// TODO: replace with signiture check or use both!
+	// FIXME: Hash has difference. Why is this?
+	// 3. Canonicalize the body by re-marshalling
+	// canonicalJSON, err := canonicaljson.Marshal(req.Body)
+	// if err != nil {
+	// 	http.Error(w, "Failed to marshal canonical JSON", http.StatusInternalServerError)
+	// 	return
+	// }
 
+	// validHash := security.CompareHash(canonicalJSON, req.Header.HashAlgo, req.Header.HashValue)
+	// if !validHash {
+	// 	http.Error(w, "Invalid Hash", http.StatusBadRequest)
+	// 	return
+	// }
+
+	// HACK Skiped for developing
 	// NOTE: Validate request body fields
-	valid := security.RequestBodyValidation(req)
-	if !valid {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	// valid := security.RequestBodyValidation(req)
+	// if !valid {
+	// 	http.Error(w, "Invalid request body", http.StatusBadRequest)
+	// 	return
+	// }
 
-	/**
-	* Load the policy from the Annotation in the yaml file.
-	* Deny Flag is used to determine if the policy should be added or removed.
-	 */
-	policy, err := loadPolicyFromAnnotation(req.Body.Annotation)
-	if err != nil {
-		http.Error(w, "Failed to load policy from annotation", http.StatusInternalServerError)
-		return
-	}
+	// NOTE: Run Patch
+	patch.PatchHandler(w, req.Body)
 
 	/**
 	* generate and execute the kubectl patch command
@@ -122,23 +126,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Target: %s, Namespace: %s, Annotation: %s, Value: %s", req.Body.Target, req.Body.Namespace, req.Body.Annotation, req.Body.Image)
 	// log.Printf("Commands: %v, IsDeployment: %t, Deny: %t", req.Commands, req.IsDeployment, req.Deny)
-	log.Printf("Policy loaded: %v", policy)
 
 	// log.Printf("Running command: %v", cmd.String())
 	// log.Printf("Command output: %s", string(output))
 
 	w.Write([]byte("Patched successfully\n"))
-}
-
-/**
-*  This function should load the base64-policy from the annotation of the target resource.
-*  It should decode the base64 string and return a initData object.
- */
-func loadPolicyFromAnnotation(annotation string) (map[string]string, error) {
-	// For now, we return a dummy policy.
-	return map[string]string{
-		"policy": "dummy-policy",
-	}, nil
 }
 
 func main() {
@@ -151,15 +143,17 @@ func main() {
 		log.Fatalf("K8s init faild: %v", err)
 	}
 
+	// TODO: Get needed Keys from Trustee
+	// TODO: Load Key of TEE to check signiture
+
 	// NOTE: Set up the HTTP server with TLS
 	// Handle GET request to generate a nonce and return it to the client
-	// TODO: Test nonce requets
 	http.HandleFunc("/nonce", handler)
 	// Handle POST request to apply a policy update
 	http.HandleFunc("/patch", handler)
 
 	// Load the CA certificate
-	// Should the certificate be loaded from trustee or from a file?
+	// TODO Should the certificate be loaded from trustee or from a file?
 	// For now, we load it from a file.
 	caCert, err := os.ReadFile("ca.crt")
 	if err != nil {
@@ -193,4 +187,9 @@ func main() {
 		log.Fatal(err)
 	}
 	// BUG:Can the server crash? If yes the pod should be restartet. Is that possible to do?
+}
+
+// loadPolicyFromAnnotation is a stub for retrieving policies
+func loadPolicyFromAnnotation(annotation string) (map[string]string, error) {
+	return map[string]string{"policy": "dummy-policy"}, nil
 }

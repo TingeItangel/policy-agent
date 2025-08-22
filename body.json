@@ -1,10 +1,10 @@
 {
-  "target": "my-deployment",
-  "namespace": "default",
   "annotation": "kata-policy",
   "commands": ["echo", "hello"],
+  "deny": true,
   "image": "nginx:latest",
   "isDeployment": true,
-  "deny": true,
-  "nonce": "bd1282f7-2395-4c96-8490-7183df25f3a1"
+  "namespace": "default",
+  "nonce": "c4b8394c-f370-4c6f-96b8-6c07ab283fce",
+  "target": "my-deployment"
 }

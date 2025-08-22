@@ -1,13 +1,13 @@
 package patch
 
 import (
-	"encoding/json"
-	"io"
-	"log"
+	"fmt"
 	"net/http"
-	"policy-agent/policy-agent/types"
+	"policy-agent/k8s"
+	"policy-agent/security"
+	"policy-agent/types"
 
-	"github.com/redis/go-redis/v9"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 /**
@@ -16,61 +16,61 @@ import (
 * If the nonce is valid, it applies the policy update and deletes the nonce.
 * If the nonce is invalid or expired, it returns an error.
  */
-func patchHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, _ := io.ReadAll(r.Body)
-	defer r.Body.Close()
-
-	var req types.PolicyRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	// Verify nonce exists in Redis
-	val, err := rdb.Get(ctx, req.Nonce).Result()
-	if err == redis.Nil || val != "valid" {
-		http.Error(w, "Invalid or expired nonce", http.StatusForbidden)
-		return
-	}
+func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
+	runtimeObj, err := findPatchTarget(req)
 	if err != nil {
-		http.Error(w, "Redis error", http.StatusInternalServerError)
+		http.Error(w, "Finding Target in K8s Cluster faild", http.StatusBadRequest)
 		return
 	}
 
-	// Delete nonce from Redis after use to prevent replay
-	rdb.Del(ctx, req.Nonce)
-
-	// Log request details (instead of executing kubectl in this example)
-	log.Printf("Incoming patch request: %+v", req)
-
-	// Example: Load policy from annotation
-	policy, err := loadPolicyFromAnnotation(req.Annotation)
+	// Get Annotaion field value
+	base64InitData, err := k8s.GetInitDataFromAnnotaion(runtimeObj, req.IsDeployment)
+	// Decrypt base64
+	initData, err := security.DecryptBase64(base64InitData)
 	if err != nil {
-		http.Error(w, "Failed to load policy from annotation", http.StatusInternalServerError)
+		http.Error(w, "Policy Data can not be read", http.StatusBadRequest)
 		return
 	}
+	fmt.Printf("polcy: %s", initData)
 
-	log.Printf("Policy loaded: %v", policy)
+	// Patch Annotation field value
+	// 1. Find place in initData: image or commands
+	// 2. Remove or add
 
-	w.Write([]byte("Patched successfully with nonce verification\n"))
+	// Decode initData
+
+	// Get ref value from Trustee
+
+	// Generate new ref value
+
+	// Update Value in Trustee
+
+	// Saving in K8s (Pod or deploye: kubectl apply ...)
+
+	// Trigger restart of pod or deplyoment
+
+	// return success
+
 }
 
-// loadPolicyFromAnnotation is a stub for retrieving policies
-func loadPolicyFromAnnotation(annotation string) (map[string]string, error) {
-	return map[string]string{"policy": "dummy-policy"}, nil
-}
-
-func findPatchTarget(req types.PolicyRequest) (string, error) {
-	// This function would contain logic to find the target for the patch
-	// For now, we return a dummy target
+func findPatchTarget(req types.PolicyBody) (runtime.Object, error) {
 	if req.Target == "" {
-		return "", nil
+		return nil, fmt.Errorf("target must not be empty")
 	}
-	return "dummy-target", nil
 
+	// NOTE: Target is a Deployment
+	if req.IsDeployment {
+		deployment, err := k8s.GetDeplyoment(req.Namespace, req.Target)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get deployment %s/%s: %w", req.Namespace, req.Target, err)
+		}
+		return deployment, nil
+	}
+
+	// NOTE: Target is a Pod
+	pod, err := k8s.GetPod(req.Namespace, req.Target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s/%s: %w", req.Namespace, req.Target, err)
+	}
+	return pod, nil
 }

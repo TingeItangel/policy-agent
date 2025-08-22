@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"policy-agent/policy-agent/types"
+	"policy-agent/types"
 	"strings"
 )
 
@@ -28,16 +28,12 @@ func RequestBodyValidation(req types.PolicyRequest) bool {
 		return false
 	}
 
+	// HACK Skiped for developing
 	// NOTE: Delete the nonce after successful verification to prevent replay attacks and race conditions
 	// err := deleteNonce(req.Body.Nonce)
 	// if err != nil {
 	// 	return false
 	// }
-
-	// NOTE: Check Target
-	if req.Body.Target == "" {
-		return false
-	}
 
 	// NOTE: Check Namespace (no namespace == "default")
 	// TODO: if target does not exist in namespace, return false
@@ -60,9 +56,9 @@ func RequestBodyValidation(req types.PolicyRequest) bool {
 * Compare HashValue of Request Body and own calculation
 * returns true if hashes are same, false if not
  */
-func CompareHash(body []byte, hashAlgo string, hashValue string) bool {
+func CompareHash(data []byte, hashAlgo string, hashValue string) bool {
 	// Calculate own hash over body
-	calculatedHash, err := calculateHash(body, hashAlgo)
+	calculatedHash, err := calculateHash(data, hashAlgo)
 	if err != nil {
 		return false
 	}
@@ -92,7 +88,6 @@ func calculateHash(data []byte, hashAlgo string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported hash type: %s", hashAlgo)
 	}
-
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

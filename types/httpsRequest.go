@@ -15,8 +15,6 @@ type PolicyBody struct {
 	IsDeployment bool     `json:"isDeployment"` // true if the target is a deployment
 	Deny         bool     `json:"deny"`         // true if the policy is a deny policy
 	Nonce        string   `json:"nonce"`        // Unique identifier for the request to prevent replay attacks
-	HashValue    string   `json:"hash"`         // Hash over the request body for integrity verification
-	HashAlgo     string   `json:"hashType"`     // Type of hash used (e.g., "SHA256")
 }
 
 type PolicyRequest struct {

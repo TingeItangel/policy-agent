@@ -9,9 +9,8 @@ type PolicyHeader struct {
 type PolicyBody struct {
 	Target       string   `json:"target"`       // e.g. "my-deployment"
 	Namespace    string   `json:"namespace"`    // e.g. "default"
-	Annotation   string   `json:"annotation"`   // e.g. "my-annotation"
 	Commands     []string `json:"commands"`     // e.g. ["echo 'hello'"]
-	Image        string   `json:"image"`        // e.g. "nginx:latest"
+	Images       []string `json:"image"`        // e.g. ["nginx:latest"]
 	IsDeployment bool     `json:"isDeployment"` // true if the target is a deployment
 	Deny         bool     `json:"deny"`         // true if the policy is a deny policy
 	Nonce        string   `json:"nonce"`        // Unique identifier for the request to prevent replay attacks

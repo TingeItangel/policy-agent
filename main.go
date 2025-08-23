@@ -23,7 +23,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// NOTE: Handle GET requests
+	// --- Handle GET requests ---
 	if r.Method == http.MethodGet {
 		success, nonce := security.GetNewNonce()
 		// Return nonce to the client
@@ -37,15 +37,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// NOTE: Handle POST request to apply a policy update
-
-	// NOTE: Create PolicyRequest Object
+	// --- Handle POST request to apply a policy update ---
 	var req types.PolicyRequest
 
 	req.Header.HashAlgo = r.Header.Get("X-Hash-Algorithm")
 	req.Header.HashValue = r.Header.Get("X-Hash-Value")
 
-	// NOTE: Parse Body to PolicyRequest type
+	// --- Parse Body to PolicyRequest type ---
 	// 1. Read raw request body
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -74,57 +72,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// 	return
 	// }
 
-	// HACK Skiped for developing
-	// NOTE: Validate request body fields
+	// HACK Skiped for developing. Has to be added again !!!
+	// NOTE: --- Validate request body fields ---
 	// valid := security.RequestBodyValidation(req)
 	// if !valid {
 	// 	http.Error(w, "Invalid request body", http.StatusBadRequest)
 	// 	return
 	// }
 
-	// NOTE: Run Patch
+	// NOTE: --- Run Patch ---
 	patch.PatchHandler(w, req.Body)
 
-	/**
-	* generate and execute the kubectl patch command
-	* Example:
-	* Request body:
-	* {
-	*   "target": "my-deployment",
-	*   "namespace": "default",
-	*   "annotation": "my-annotation",
-	*   "image": "nginx:latest",
-	*   "commands": ["echo 'hello'"],
-	*   "isDeployment": true,
-	*   "deny": false
-	* }
-	* The command will patch the deployment with the specified annotation and image.
-	* --type=merge is used to merge the new annotation into the existing ones.
-	* kubectl patch deployment my-deployment -n default --type=merge -p '{"spec":{"template":{"metadata":{"annotations":{"my-annotation":"nginx:latest"}}}}}'
-	 */
-	// patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"%s":"%s"}}}}}`, req.Annotation, req.Image)
-	// cmd := exec.Command("kubectl", "patch", "deployment", req.Target,
-	// 	"-n", req.Namespace,
-	// 	"--type=merge",
-	// 	"-p", patch)
-
-	/**
-	* After the patch a rollout is triggert if isDeployment is true.
-	* Otherwise the Pod is restarted. (kubectl delete pod <pod-name> -n <namespace> && kubectl apply -f <deployment-file>)
-	* What if not Pod File is provided? => Safe content of Pod File and use it to restart the Pod.
-	 */
-
-	/**
-	*
-	 */
-
-	// output, err := cmd.CombinedOutput()
-	// if err != nil {
-	// 	http.Error(w, fmt.Sprintf("Patch failed: %s\n%s", err, output), 500)
-	// 	return
-	// }
-
-	log.Printf("Target: %s, Namespace: %s, Annotation: %s, Value: %s", req.Body.Target, req.Body.Namespace, req.Body.Annotation, req.Body.Image)
+	log.Printf("Target: %s, Namespace: %s, Value: %s", req.Body.Target, req.Body.Namespace, req.Body.Images)
 	// log.Printf("Commands: %v, IsDeployment: %t, Deny: %t", req.Commands, req.IsDeployment, req.Deny)
 
 	// log.Printf("Running command: %v", cmd.String())

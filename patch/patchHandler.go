@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"policy-agent/k8s"
 	"policy-agent/security"
+	"policy-agent/trustee"
 	"policy-agent/types"
 	"regexp"
 	"slices"
+	"strings"
 
 	"encoding/json"
 
@@ -22,18 +24,27 @@ import (
 * If the nonce is invalid or expired, it returns an error.
  */
 func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
+	rvpsUrl := "http://192.168.178.105:32754"
+	// newInitDataTomlTest := "Testing success!"
+
+	trustee.GetRefValues(rvpsUrl)
+
+	// trustee.SetRefValue(rvpsUrl, newInitDataTomlTest)
+
+	return
+
 	// --- preparation ---
 	// find pod or deplyoment in k8s cluster
 	runtimeObj, err := findPatchTarget(req)
 	if err != nil {
-		http.Error(w, "Finding Target in K8s Cluster faild", http.StatusBadRequest)
+		http.Error(w, "Finding PatchTarget in K8s Cluster faild", http.StatusBadRequest)
 		return
 	}
 
 	// Get Annotaion field value
-	base64InitData, err := k8s.GetInitDataFromAnnotaion(runtimeObj, req.IsDeployment)
+	b64InitData, err := k8s.GetInitDataFromAnnotaion(runtimeObj)
 	// Decrypt base64
-	initData, err := security.DecryptBase64(base64InitData)
+	initData, err := security.DecryptBase64(b64InitData)
 	if err != nil {
 		http.Error(w, "Policy Data can not be read", http.StatusBadRequest)
 		return
@@ -52,6 +63,7 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
 		http.Error(w, "initData missing [data] section", http.StatusBadRequest)
 		return
 	}
+
 	// Extract "policy.rego" from [data] section
 	policyRego, ok := dataSection["policy.rego"].(string)
 	if !ok {
@@ -59,16 +71,31 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
 		return
 	}
 
-	// -- policy update --
+	// --- policy update ---
 	updatedRego, err := updatePolicyData(policyRego, req)
 	if err != nil {
 		http.Error(w, "Failed to update policy data", http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("new Rego: %v", updatedRego)
 
-	// -- add new rego in pod or deplyoment object ---
+	// Replace policy.rego with the updated one
+	dataSection["policy.rego"] = updatedRego
 
+	newInitDataToml, err := buildInitDataToml(parsed, dataSection)
+	if err != nil {
+		http.Error(w, "Failed to rebuild initData TOML", http.StatusInternalServerError)
+		return
+	}
+	fmt.Println("Rebuilt TOML:\n", newInitDataToml)
+	// Encode base64 and gzip again
+	newB64InitData, err := security.EncryptBase64(newInitDataToml)
+	if err != nil {
+		http.Error(w, "Failed encrypt the new initdata in base64", http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("b64InitData: \n%v", newB64InitData)
+
+	// TODO
 	// --- trustee ---
 	// Get ref value from Trustee
 
@@ -76,41 +103,55 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
 
 	// Update Value in Trustee
 
-	// --- apply patch in cluster ---
-	// apply patch in k8s cluster
-	// pod: delete pod and apply new pod witch pod obj from above
-	// deployment: patch deployment file and trigger rollout
-
-	// return success
-
+	// --- apply patch in k8s cluster ---
+	err = k8s.UpdateAnnotationValue(runtimeObj, newB64InitData, req.Namespace)
+	if err != nil {
+		http.Error(w, "Failed to apply patch to k8s cluster", http.StatusBadRequest)
+		return
+	}
+	// k8s restarts pods automaticly: see kubectl describe deployment <name> -n <namespace>
 }
 
 func findPatchTarget(req types.PolicyBody) (runtime.Object, error) {
-	if req.Target == "" {
-		return nil, fmt.Errorf("target must not be empty")
+	if req.DeplyomentName == "" {
+		return nil, fmt.Errorf("deplyoment name must not be empty")
 	}
 
 	// NOTE: Target is a Deployment
-	if req.IsDeployment {
-		deployment, err := k8s.GetDeplyoment(req.Namespace, req.Target)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get deployment %s/%s: %w", req.Namespace, req.Target, err)
-		}
-		return deployment, nil
-	}
-
-	// NOTE: Target is a Pod
-	pod, err := k8s.GetPod(req.Namespace, req.Target)
+	deployment, err := k8s.GetDeplyoment(req.Namespace, req.DeplyomentName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod %s/%s: %w", req.Namespace, req.Target, err)
+		return nil, fmt.Errorf("failed to get deployment %s/%s: %w", req.Namespace, req.DeplyomentName, err)
 	}
-	return pod, nil
+	return deployment, nil
+
+	// NOTE: Pods are excluded, only deplyoments can be patched
+	// pod, err := k8s.GetPod(req.Namespace, req.DeplyomentName)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to get pod %s/%s: %w", req.Namespace, req.DeplyomentName, err)
+	// }
+	// return pod, nil
 }
 
 /**
 *
  */
 func updatePolicyData(policyRego string, req types.PolicyBody) (string, error) {
+	// --- Check that essential rules exist ---
+	requiredBlocks := []string{
+		`CreateContainerRequest\s+if\s*{\s*every\s+storage\s+in\s+input\.storages\s*{\s*some\s+allowed_image\s+in\s+policy_data\.allowed_images\s*storage\.source\s*==\s*allowed_image\s*}\s*}`,
+		`ExecProcessRequest\s+if\s*{\s*input_command\s*=\s*concat\(" ",\s*input\.process\.Args\)\s*some\s+allowed_command\s+in\s+policy_data\.allowed_commands\s*input_command\s*==\s*allowed_command\s*}`,
+	}
+
+	for _, block := range requiredBlocks {
+		matched, err := regexp.MatchString(block, policyRego)
+		if err != nil {
+			return "", fmt.Errorf("regex error: %w", err)
+		}
+		if !matched {
+			return "", fmt.Errorf("required policy block missing: %s", block)
+		}
+	}
+	// --- Check for existing policy_data block ---
 	re := regexp.MustCompile(`(?s)policy_data\s*:=\s*({.*?})`)
 	matches := re.FindStringSubmatch(policyRego)
 
@@ -129,7 +170,8 @@ func updatePolicyData(policyRego string, req types.PolicyBody) (string, error) {
 			"allowed_images":   {},
 		}
 	} else {
-		// --- Extract JSON-like block ---
+		// --- policy_data does exist ---
+		// Extract JSON-like block
 		policyBlock := matches[1]
 		policyBlock = cleanPolicyBlock(policyBlock)
 
@@ -208,4 +250,47 @@ func cleanPolicyBlock(block string) string {
 	block = regexp.MustCompile(`,(\s*])`).ReplaceAllString(block, "$1")
 	block = regexp.MustCompile(`,(\s*})`).ReplaceAllString(block, "$1")
 	return block
+}
+
+/**
+* This function creates a the toml content with the old unchanged and new values
+* @return the toml content as string
+ */
+func buildInitDataToml(parsed map[string]interface{}, newDataSection map[string]interface{}) (string, error) {
+	// Extract top-level values
+	version, _ := parsed["version"].(string)
+	algorithm, _ := parsed["algorithm"].(string)
+
+	dataSection, ok := parsed["data"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("missing [data] section")
+	}
+
+	// Extract in fixed order
+	policyRego, _ := dataSection["policy.rego"].(string)
+	aaToml, _ := dataSection["aa.toml"].(string)
+	cdhToml, _ := dataSection["cdh.toml"].(string)
+
+	// Rebuild string manually
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("version = %q\n", version))
+	sb.WriteString(fmt.Sprintf("algorithm = %q\n", algorithm))
+	sb.WriteString("[data]\n")
+
+	// Write policy.rego block
+	sb.WriteString("\"policy.rego\" = '''\n")
+	sb.WriteString(policyRego)
+	sb.WriteString("\n'''\n\n")
+
+	// Write aa.toml block
+	sb.WriteString("\"aa.toml\" = '''\n")
+	sb.WriteString(aaToml)
+	sb.WriteString("\n'''\n\n")
+
+	// Write cdh.toml block
+	sb.WriteString("\"cdh.toml\" = '''\n")
+	sb.WriteString(cdhToml)
+	sb.WriteString("\n'''\n")
+
+	return sb.String(), nil
 }

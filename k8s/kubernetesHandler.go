@@ -16,6 +16,7 @@ import (
 )
 
 var clientset *kubernetes.Clientset // shared client for the whole package
+const initDataAnnotationKey = "io.katacontainers.config.runtime.cc_init_data"
 
 // Init initializes the Kubernetes client once
 func Init() error {
@@ -47,18 +48,18 @@ func homeDir() string {
 	return os.Getenv("USERPROFILE") // windows
 }
 
-// GetPod retrieves a Pod object from a given namespace
-func GetPod(namespace string, podName string) (*corev1.Pod, error) {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(
-		context.TODO(),
-		podName,
-		metav1.GetOptions{},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pod %s in namespace %s: %v", podName, namespace, err)
-	}
-	return pod, nil
-}
+// // GetPod retrieves a Pod object from a given namespace
+// func GetPod(namespace string, podName string) (*corev1.Pod, error) {
+// 	pod, err := clientset.CoreV1().Pods(namespace).Get(
+// 		context.TODO(),
+// 		podName,
+// 		metav1.GetOptions{},
+// 	)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to get pod %s in namespace %s: %v", podName, namespace, err)
+// 	}
+// 	return pod, nil
+// }
 
 func GetDeplyoment(namespace string, deploymentName string) (*appsv1.Deployment, error) {
 	deployment, err := clientset.AppsV1().Deployments(namespace).Get(
@@ -73,35 +74,57 @@ func GetDeplyoment(namespace string, deploymentName string) (*appsv1.Deployment,
 	return deployment, nil
 }
 
-func GetInitDataFromAnnotaion(runtimeObj runtime.Object, isDepoylemt bool) (string, error) {
-	const initDataAnnotation = "io.katacontainers.config.runtime.cc_init_data"
+func GetInitDataFromAnnotaion(runtimeObj runtime.Object) (string, error) {
+	deploy, ok := runtimeObj.(*appsv1.Deployment)
+	if !ok {
+		return "", fmt.Errorf("expected Deployment object, got %T", runtimeObj)
+	}
+	// const initDataAnnotationKey = "io.katacontainers.config.runtime.cc_init_data"
 	var annotations map[string]string
 
-	if isDepoylemt {
-		deploy, ok := runtimeObj.(*appsv1.Deployment)
-		if !ok {
-			return "", fmt.Errorf("expected Deployment object, got %T", runtimeObj)
-		}
-		annotations = deploy.Spec.Template.Annotations
-		if annotations == nil { // fallback: deployment-level annotations
-			annotations = deploy.Annotations
-		}
-	} else {
-		pod, ok := runtimeObj.(*corev1.Pod)
-		if !ok {
-			return "", fmt.Errorf("expected Pod object, got %T", runtimeObj)
-		}
-		annotations = pod.Annotations
+	annotations = deploy.Spec.Template.Annotations
+	if annotations == nil { // fallback: deployment-level annotations
+		annotations = deploy.Annotations
 	}
-
 	if annotations == nil {
 		return "", fmt.Errorf("no annotations found on object")
 	}
 
-	base64InitData, ok := annotations[initDataAnnotation]
+	base64InitData, ok := annotations[initDataAnnotationKey]
 	if !ok {
-		return "", fmt.Errorf("annotation %q not found", initDataAnnotation)
+		return "", fmt.Errorf("annotation %q not found", initDataAnnotationKey)
 	}
 
 	return base64InitData, nil
+}
+
+func UpdateAnnotationValue(runtimeObj runtime.Object, annotationValue, namespace string) error {
+	switch obj := runtimeObj.(type) {
+
+	case *corev1.Pod:
+		// Pods are mostly immutable. Updating annotations on a standalone Pod
+		// will not trigger a restart or update the runtime state. Deleting
+		// and recreating a Pod is destructive: it removes volumes, ephemeral
+		// storage, and runtime state.
+		// Thus, automatic updates are only supported for Deployments.
+		return fmt.Errorf(
+			"only Deployments are supported for automatic updates; standalone Pod '%s' in namespace '%s' cannot be updated automatically",
+			obj.Name, namespace,
+		)
+
+	case *appsv1.Deployment:
+		if obj.Spec.Template.Annotations == nil {
+			obj.Spec.Template.Annotations = map[string]string{}
+		}
+		obj.Spec.Template.Annotations[initDataAnnotationKey] = annotationValue
+
+		_, err := clientset.AppsV1().Deployments(namespace).Update(context.TODO(), obj, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update deployment annotation: %w", err)
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported runtime object type: %T", obj)
+	}
 }

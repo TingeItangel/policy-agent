@@ -83,7 +83,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// NOTE: --- Run Patch ---
 	patch.PatchHandler(w, req.Body)
 
-	log.Printf("Target: %s, Namespace: %s, Value: %s", req.Body.Target, req.Body.Namespace, req.Body.Images)
+	log.Printf("Target: %s, Namespace: %s, Value: %s", req.Body.DeplyomentName, req.Body.Namespace, req.Body.Images)
 	// log.Printf("Commands: %v, IsDeployment: %t, Deny: %t", req.Commands, req.IsDeployment, req.Deny)
 
 	// log.Printf("Running command: %v", cmd.String())
@@ -146,9 +146,4 @@ func main() {
 		log.Fatal(err)
 	}
 	// BUG:Can the server crash? If yes the pod should be restartet. Is that possible to do?
-}
-
-// loadPolicyFromAnnotation is a stub for retrieving policies
-func loadPolicyFromAnnotation(annotation string) (map[string]string, error) {
-	return map[string]string{"policy": "dummy-policy"}, nil
 }

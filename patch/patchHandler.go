@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 
 	"github.com/pelletier/go-toml/v2"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 /**
@@ -23,27 +22,19 @@ import (
 * If the nonce is valid, it applies the policy update and deletes the nonce.
 * If the nonce is invalid or expired, it returns an error.
  */
-func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
-	rvpsUrl := "http://192.168.178.105:32754"
-	// newInitDataTomlTest := "Testing success!"
+func PatchHandler(w http.ResponseWriter, req types.PolicyRequestBody) {
 
-	trustee.GetRefValues(rvpsUrl)
-
-	// trustee.SetRefValue(rvpsUrl, newInitDataTomlTest)
-
-	return
-
-	// --- preparation ---
-	// find pod or deplyoment in k8s cluster
-	runtimeObj, err := findPatchTarget(req)
+	// --- Preparation ---
+	// find deplyoment in the untrusted cluster
+	deployment, err := k8s.GetDeploymentFromUntrustedCluster(req)
 	if err != nil {
-		http.Error(w, "Finding PatchTarget in K8s Cluster faild", http.StatusBadRequest)
+		http.Error(w, "Failed to get deployment object from the untrusted cluster", http.StatusBadRequest)
 		return
 	}
 
-	// Get Annotaion field value
-	b64InitData, err := k8s.GetInitDataFromAnnotaion(runtimeObj)
-	// Decrypt base64
+	// Get Annotaion field value from deployment
+	b64InitData, err := k8s.GetInitDataFromAnnotaion(deployment)
+	// Decrypt base64 annotation value
 	initData, err := security.DecryptBase64(b64InitData)
 	if err != nil {
 		http.Error(w, "Policy Data can not be read", http.StatusBadRequest)
@@ -71,7 +62,7 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
 		return
 	}
 
-	// --- policy update ---
+	// --- Start policy update ---
 	updatedRego, err := updatePolicyData(policyRego, req)
 	if err != nil {
 		http.Error(w, "Failed to update policy data", http.StatusBadRequest)
@@ -86,56 +77,39 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyBody) {
 		http.Error(w, "Failed to rebuild initData TOML", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("Rebuilt TOML:\n", newInitDataToml)
+
 	// Encode base64 and gzip again
 	newB64InitData, err := security.EncryptBase64(newInitDataToml)
 	if err != nil {
 		http.Error(w, "Failed encrypt the new initdata in base64", http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("b64InitData: \n%v", newB64InitData)
 
-	// TODO
-	// --- trustee ---
-	// Get ref value from Trustee
+	// --- Patch ref values in trustee ---
+	err = trustee.PatchReferenceValues()
+	if err != nil {
+		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
+		return
+	}
 
-	// Generate new ref value
-
-	// Update Value in Trustee
-
-	// --- apply patch in k8s cluster ---
-	err = k8s.UpdateAnnotationValue(runtimeObj, newB64InitData, req.Namespace)
+	// --- Apply patch in local cluster ---
+	err = k8s.UpdateAnnotationValue(deployment, newB64InitData, req.Namespace)
 	if err != nil {
 		http.Error(w, "Failed to apply patch to k8s cluster", http.StatusBadRequest)
 		return
 	}
-	// k8s restarts pods automaticly: see kubectl describe deployment <name> -n <namespace>
-}
-
-func findPatchTarget(req types.PolicyBody) (runtime.Object, error) {
-	if req.DeplyomentName == "" {
-		return nil, fmt.Errorf("deplyoment name must not be empty")
-	}
-
-	// NOTE: Target is a Deployment
-	deployment, err := k8s.GetDeplyoment(req.Namespace, req.DeplyomentName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment %s/%s: %w", req.Namespace, req.DeplyomentName, err)
-	}
-	return deployment, nil
-
-	// NOTE: Pods are excluded, only deplyoments can be patched
-	// pod, err := k8s.GetPod(req.Namespace, req.DeplyomentName)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to get pod %s/%s: %w", req.Namespace, req.DeplyomentName, err)
-	// }
-	// return pod, nil
+	// NOTE: k8s restarts pods automaticly: see kubectl describe deployment <name> -n <namespace>
 }
 
 /**
-*
+* This function updates the policy data in the given Rego policy according to the request body.
+* It adds or removes allowed images and commands based on the 'deny' flag in the request.
+* It ensures that essential policy blocks are present and that the policy_data block is correctly formatted.
+* @param policyRego The original Rego policy as a string.
+* @param req The PolicyRequestBody containing images, commands, and the deny flag.
+* @return The updated Rego policy as a string, or an error if the update fails.
  */
-func updatePolicyData(policyRego string, req types.PolicyBody) (string, error) {
+func updatePolicyData(policyRego string, req types.PolicyRequestBody) (string, error) {
 	// --- Check that essential rules exist ---
 	requiredBlocks := []string{
 		`CreateContainerRequest\s+if\s*{\s*every\s+storage\s+in\s+input\.storages\s*{\s*some\s+allowed_image\s+in\s+policy_data\.allowed_images\s*storage\.source\s*==\s*allowed_image\s*}\s*}`,
@@ -181,7 +155,7 @@ func updatePolicyData(policyRego string, req types.PolicyBody) (string, error) {
 		}
 	}
 
-	// Ensure keys exist
+	// Ensure keys exist otherwise the policy map is unnecessary
 	if _, ok := policyMap["allowed_commands"]; !ok {
 		policyMap["allowed_commands"] = []string{}
 	}

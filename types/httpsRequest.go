@@ -1,13 +1,13 @@
 package types
 
-type PolicyHeader struct {
+type PolicyRequestHeader struct {
 	HashAlgo  string `json:"hashType"`
 	HashValue string `json:"hash"`
 }
 
 // PolicyRequest represents the JSON payload sent by the client
-type PolicyBody struct {
-	DeplyomentName string   `json:"deplyomentName"` // e.g. "my-deployment"
+type PolicyRequestBody struct {
+	DeploymentName string   `json:"deploymentName"` // e.g. "my-deployment"
 	Namespace      string   `json:"namespace"`      // e.g. "default"
 	Commands       []string `json:"commands"`       // e.g. ["echo 'hello'"]
 	Images         []string `json:"image"`          // e.g. ["nginx:latest"]
@@ -16,6 +16,6 @@ type PolicyBody struct {
 }
 
 type PolicyRequest struct {
-	Header PolicyHeader
-	Body   PolicyBody
+	Header PolicyRequestHeader
+	Body   PolicyRequestBody
 }

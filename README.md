@@ -338,3 +338,140 @@ Wenn du also z. B. wirklich absichern willst, dass:
     Der Sender attestiert und autorisiert ist
 
 … dann brauchst du eine Anwendungsebene-Nonce + Signatur.
+
+# Remote Access from trusted cluster in untrusted cluster
+
+🔐 1. Principle: “API access = control”
+
+Anyone with access to the Kubernetes API server can change workloads.\*\*\*\*
+So the connection between trusted → untrusted must be locked down with the same care as root access.
+
+🛠 2. Minimal RBAC in the untrusted cluster
+
+In the untrusted cluster, create a ServiceAccount + RBAC binding that only allows what the trusted agent needs:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-agent
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default # or target namespace
+  name: patcher-role
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: patcher-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: policy-agent
+    namespace: kube-system
+roleRef:
+  kind: Role
+  name: patcher-role
+  apiGroup: rbac.authorization.k8s.io
+```
+
+In the untrusted cluster: `kubectl apply -f ~/project/policy-agent/deployments/service-account-untrusted-cluster.yaml`
+
+This way the trusted agent can’t delete nodes, secrets, etc. — only touch Deployments.
+
+🔑 3. Export kubeconfig for that ServiceAccount
+
+Extract a kubeconfig that uses that ServiceAccount’s token and the untrusted cluster’s API server:
+
+```bash
+kubectl --context=untrusted \
+  -n kube-system create token policy-agent > sa.token
+
+kubectl --context=untrusted config view \
+  --minify -o jsonpath='{.clusters[0].cluster.server}'
+# e.g. https://untrusted-control-plane:6443
+```
+
+Then build a dedicated kubeconfig (only with that token + CA + server).
+This kubeconfig goes into the trusted cluster (secret mounted into the patch-agent pod).
+
+🔒 4. Secure network channel
+
+You have a few options:
+
+VPN / WireGuard / Tailscale / Istio mTLS → connect the trusted pod to the untrusted API server over encrypted tunnel.
+
+NetworkPolicy / firewall rules → restrict API server to accept requests only from the trusted cluster’s CIDR.
+
+mTLS ingress (last resort) → expose untrusted API server behind a hardened ingress with client cert auth.
+
+⚠️ Never expose https://<untrusted>:6443 directly to the internet without mutual TLS.
+
+🧾 5. Trusted patch-agent usage
+
+Now in the trusted cluster, your patch-agent pod just needs:
+
+The untrusted kubeconfig mounted as a secret.
+
+A Kubernetes client library (Go client-go, Python client, etc.) configured to use that kubeconfig.
+
+When a request comes in (with token/nonce), it patches the untrusted Deployment via the kubeconfig context.
+
+✅ Security benefits
+
+Untrusted cluster runs no policy-agent (attack surface reduced).
+
+Redis + nonce logic stays in the trusted cluster.
+
+Even if the untrusted cluster is fully compromised, the attacker cannot impersonate the trusted agent because they don’t have the ServiceAccount token or secure tunnel.
+
+Replay protection still handled inside trusted cluster (Redis).
+
+## Create a ServiceAccount Token
+
+```
+kubectl apply -f - << EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: policy-agent-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: policy-agent
+type: kubernetes.io/service-account-token
+EOF
+```
+
+`kubectl -n kube-system get secret policy-agent-token -o yaml`
+
+That token: value (after base64 decode) is what your trusted-cluster policy-agent will use.
+
+`kubectl cluster-info | grep "control plane"`
+
+Kubernetes control plane is running at https://127.0.0.1:45833
+
+apiVersion: v1
+data:
+ca.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJQkREa1Nlbm1HU2d3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRBNE1qY3hORFExTlRSYUZ3MHpOVEE0TWpVeE5EVXdOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURUbVI2cVk2WU4yTHlaMnZ4endsTVk0R3VyTisra2t3OFFodFdENFdmV1lIRVQ3S3RGZ1phVzNjeDEKUkFaaWptNHlkTURKYitMNzFIY1hQc0liL0JTOWNqY3A4Qmd5M1Jpa1FhZ1ZQeG0wMjhYN2doYVp6Q1h5dVJCcQpiNGFpWWxxQjBQZDFuRVZjdkZIc2Z1eUxhaStFWXdpQ3pSYTRuQ1NQb2t4UWdhLzQyOVluYmxPUWZCQms2U3M2CjB4R1hxMnlLN3UycUVibDkyT3pHZnVld2VvaUl5NDI0YjVpd3NoUWRnc1Jwd0FVV2ptR0tHakdGYzVBOW9uN28KQW1Ob3pRNnVSOTdTcXh6NlJHN0RBQ09TekgxaVBNcVh5UTZoKy9MZW5DaTNucUdaYlVjODBlbytCRGVqS0JhZApOSFFkRE5BRFB3bExOM2JiQXhoNDlhQjg2T2poQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSalE4bEJiclBZelYwRW1mWjgzdHQwL3ZXLzVqQVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQ0pTUy9ybzRtWApWMWpKclhGOWlqZEl2dmwvSFgrSVI0Y1N1Z2ZnejNFK1JzM1oxS3dFenZjWW85NHNrdGh1QkM5Vk4rYnNWYXM0ClF2RmdoZG90ZDRENWdFTml5b1UwbUplYXEwaXMwblZKc0VCZTQ5ZlNGQjR4TndKYVhrc1ZUZ3lpMldTbFVZcVEKY1NqVzh2MDZOcnZyUjAxd0Qxb2tDc0p5a3FCME9RbzJtTnFrVzAwdWhLV3Y4Z1BkQkNONCtXbDhMeEtaa21HNwpKdXRsUmN0ek9IQkVIOTZkbEdlNXRSbjBkcmFndTNhdzFZUldVUE1ISXRGck81TUZhUFo4Rjl0S29jVFRpckRXCmNTaWpmVHJnREh4L1M4TU9Uc0hMNC83RXJCT283dlIwbEVJaXhlanE5dHNPVTVYOVI4TXluMFF0M0NzcUhxTG8KUGFWVzdPeXllTnhsCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+namespace: a3ViZS1zeXN0ZW0=
+token: ZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklsbHNZbTVMZGtWSFRWcEhSMmgzTFZwbE9WVldaVTVKTm1sQmN6ZFZSbUprUWtSdlVXSmhkVUUyTVUwaWZRLmV5SnBjM01pT2lKcmRXSmxjbTVsZEdWekwzTmxjblpwWTJWaFkyTnZkVzUwSWl3aWEzVmlaWEp1WlhSbGN5NXBieTl6WlhKMmFXTmxZV05qYjNWdWRDOXVZVzFsYzNCaFkyVWlPaUpyZFdKbExYTjVjM1JsYlNJc0ltdDFZbVZ5Ym1WMFpYTXVhVzh2YzJWeWRtbGpaV0ZqWTI5MWJuUXZjMlZqY21WMExtNWhiV1VpT2lKd2IyeHBZM2t0WVdkbGJuUXRkRzlyWlc0aUxDSnJkV0psY201bGRHVnpMbWx2TDNObGNuWnBZMlZoWTJOdmRXNTBMM05sY25acFkyVXRZV05qYjNWdWRDNXVZVzFsSWpvaWNHOXNhV041TFdGblpXNTBJaXdpYTNWaVpYSnVaWFJsY3k1cGJ5OXpaWEoyYVdObFlXTmpiM1Z1ZEM5elpYSjJhV05sTFdGalkyOTFiblF1ZFdsa0lqb2lPRFF6WlRWak9XSXRNVEJsWmkwME9URTVMVGxrTnpVdE5qTmhPRGcyWWpnMk1UWmlJaXdpYzNWaUlqb2ljM2x6ZEdWdE9uTmxjblpwWTJWaFkyTnZkVzUwT210MVltVXRjM2x6ZEdWdE9uQnZiR2xqZVMxaFoyVnVkQ0o5Lld6bW4ydFp3d3pDTERLc0ZsSTRrWk42dmpLM2c0LXdjdHdlS25BbW5CYWRsVGdXNmM4dmtTSnpVVUlrN2lVaTR1S29zalVydHRER0tsZDNocVBNT25sQUhPb3NrNTV1Zmd5RUk3RDRzQkZqOFFzNjNDYXZORjBCeUM0Q0JqU0N6WG13QU5GT0U4QmZFdl85TmtZUXJGaG5NSGlzbGh0R0tvMUR1aUNVbzRCMGwwbWJXSnVlWTg2N0JEZHlwMnB1NTYyVFNULS1GRkRkdjBneE9naTVXTzZzUE1yWnBKQ29QbndMc2EwZ3VPMl9MNWRvV3RkQmZVeVFMbWt4d0p3U2ZMZ0M2MUw5ZlRiU3gzdmprS0FVbXlscHVLZUVWeFFuMXlCdTNhblQ2OEtxQlgyaUozdUlsTjNsRGlmYWdxYlVMSHJ4dzhGQ19tYm93Q3JaaWNiRG1sdw==
+kind: Secret
+metadata:
+annotations:
+kubectl.kubernetes.io/last-applied-configuration: |
+{"apiVersion":"v1","kind":"Secret","metadata":{"annotations":{"kubernetes.io/service-account.name":"policy-agent"},"name":"policy-agent-token","namespace":"kube-system"},"type":"kubernetes.io/service-account-token"}
+kubernetes.io/service-account.name: policy-agent
+kubernetes.io/service-account.uid: 843e5c9b-10ef-4919-9d75-63a886b8616b
+creationTimestamp: "2025-08-28T17:19:21Z"
+name: policy-agent-token
+namespace: kube-system
+resourceVersion: "81137"
+uid: 00848df3-cd0e-4e1d-a60d-5c580f83b9a0
+type: kubernetes.io/service-account-token

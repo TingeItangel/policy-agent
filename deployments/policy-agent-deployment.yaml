@@ -1,7 +1,48 @@
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          ports:
+            - containerPort: 6379
+          args: ["--appendonly", "yes"]
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# Policy Agent Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: policy-agent
+  labels:
+    app: policy-agent
 spec:
   replicas: 1
   selector:
@@ -13,29 +54,25 @@ spec:
         app: policy-agent
     spec:
       containers:
-        - name: server
-          image: ghcr.io/yourname/my-policy-agent # <- Dein Image
+        - name: policy-agent
+          image: myregistry/policy-agent:latest
           ports:
             - containerPort: 8443
-          volumeMounts:
-            - mountPath: "/certs"
-              name: certs
-              readOnly: true
-          args: []
-      volumes:
-        - name: certs
-          secret:
-            secretName: policy-agent-cert
+          env:
+            - name: REDIS_HOST
+              value: "redis:6379"   # connects to Redis service
 ---
+# Policy Agent Service
 apiVersion: v1
 kind: Service
 metadata:
   name: policy-agent
+  labels:
+    app: policy-agent
 spec:
   selector:
     app: policy-agent
   ports:
-    - protocol: TCP
-      port: 443 # ← Der Port, den Clients verwenden
-      targetPort: 8443 # ← Der Port im Container
-  type: ClusterIP # oder NodePort / LoadBalancer / ExternalName je nach Zugriff
+    - name: https
+      port: 8443
+      targetPort: 8443

@@ -65,6 +65,8 @@ func GetNonce(nonce string) (string, time.Duration, error) {
 		return "", 0, fmt.Errorf("redis client not initialized (call InitRedis first)")
 	}
 
+	// TODO: Decrypt value with TEE Key
+
 	// Get the nonce value from Redis
 	val, err := rdb.Get(ctx, nonce).Result()
 	if err == redis.Nil {

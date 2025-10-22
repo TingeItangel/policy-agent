@@ -244,6 +244,12 @@ Starten des Https servers: `go run main.go`
 `Curl`-Request:
 
 ```zsh
+# GET Request for nonce, session-id
+curl https://localhost:8443/auth
+```
+
+
+```zsh
 POST /policy HTTP/1.1
 Content-Type: application/json
 X-Hash-Algorithm: sha256
@@ -338,6 +344,22 @@ Wenn du also z. B. wirklich absichern willst, dass:
     Der Sender attestiert und autorisiert ist
 
 … dann brauchst du eine Anwendungsebene-Nonce + Signatur.
+
+
+# Ideas
+- sealed secrets für Keys zum Ver-/Entschlüsseln?
+
+
+- TPM- Harware sicheheitsmoudle die Schlüssel verwlten (verfügbarkeit der Schlüssel gewährleisten und zu schützen)
+  - non-voleteil Keys zu speichern
+  - Angreifer löscht Schlüssel
+- Verfügbarkeit von Schlüsseln ist ein wichtiges Thema!
+- Enclave haben keinen extra abgeschirmten Speicher für Keys.
+
+- Requester schickte Quote an Agent => Agent schickt Quote an AS von Trustee => Attestierung => Okay?
+  - Frage: Wie kommt Workload an Quote. Nur CVM Guest-components haben Zugriff darauf. Workload ist absichtlich davon isoliert
+  - Wie findet der API Request zwischen Coco Guest-Komponenten und Trustee statt? Dies muss auch irgendwie gehen. Idee: Workload schickt Request, Policy-Agenten schickt darauf einen Request an die API von der Guest-Komponente um Quote zu bekommen? Wie geht das?
+# KBS Protocol
 
 # Remote Access from trusted cluster in untrusted cluster
 

@@ -1,0 +1,26 @@
+# Dockerfile.dev
+FROM golang:1.25.4
+
+WORKDIR /app
+
+# Go & Go-Bin in PATH (wichtig!)
+ENV PATH="/usr/local/go/bin:/go/bin:${PATH}"
+ENV GOPROXY="https://proxy.golang.org,direct"
+ENV GOTOOLCHAIN="auto"
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+# Dev-Tools
+RUN go install github.com/air-verse/air@v1.63.0
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+RUN ln -s /go/bin/air /usr/local/bin/air && ln -s /go/bin/dlv /usr/local/bin/dlv
+# Module cachen
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Code (wird per skaffold sync überschrieben)
+COPY . .
+
+ENV DEV_MODE=true
+EXPOSE 8443 40000
+CMD ["air","-c",".air.toml"]

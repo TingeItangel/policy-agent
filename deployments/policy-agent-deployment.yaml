@@ -44,7 +44,6 @@ metadata:
   labels:
     app: policy-agent
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: policy-agent
@@ -60,7 +59,7 @@ spec:
             - containerPort: 8443
           env:
             - name: REDIS_HOST
-              value: "redis:6379"   # connects to Redis service
+              value: "redis:6379" # connects to Redis service
 ---
 # Policy Agent Service
 apiVersion: v1

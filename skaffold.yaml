@@ -1,0 +1,46 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: policy-agent-dev
+
+build:
+  local:
+    push: false
+  artifacts:
+    - image: policy-agent-dev
+      context: .
+      docker:
+        dockerfile: Dockerfile.dev
+      sync:
+        manual:
+          - src: "**/*.go"
+            dest: "/app"
+          - src: "go.mod"
+            dest: "/app"
+          - src: "go.sum"
+            dest: "/app"
+          - src: ".air.toml" # <- hinzufügen
+            dest: "/app"
+
+manifests:
+  rawYaml:
+    - deployments/dev-deploy.yaml
+    # - deployments/rbac-policy-agent.yaml
+
+deploy:
+  kubectl:
+    flags:
+      apply: ["--namespace=policy-agent"]
+      delete: ["--namespace=policy-agent"]
+
+portForward:
+  - resourceType: deployment
+    resourceName: policy-agent
+    namespace: policy-agent
+    port: 8443
+    localPort: 8443
+  - resourceType: deployment
+    resourceName: policy-agent
+    namespace: policy-agent
+    port: 40000
+    localPort: 40000

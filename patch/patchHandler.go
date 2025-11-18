@@ -1,39 +1,41 @@
 package patch
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"policy-agent/k8s"
 	"policy-agent/security"
-	"policy-agent/trustee"
 	"policy-agent/types"
 	"regexp"
 	"slices"
 	"strings"
 
-	"encoding/json"
-
 	"github.com/pelletier/go-toml/v2"
 )
 
 /**
-* This handler processes patch requests to apply policy updates.
-* It verifies the nonce from Redis to prevent replay attacks.
-* If the nonce is valid, it applies the policy update and deletes the nonce.
-* If the nonce is invalid or expired, it returns an error.
+* This handler processes patch requests to apply kata-policy updates.
+* It retrieves the target deployment from the remote cluster, extracts and decrypts
+* the initData annotation, updates the policy.rego according to the request body,
+* re-encrypts the initData, and applies the updated annotation back to the deployment.
  */
-func PatchHandler(w http.ResponseWriter, req types.PolicyRequestBody) {
+func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyRequest) {
 
 	// --- Preparation ---
-	// find deplyoment in the untrusted cluster
-	deployment, err := k8s.GetDeploymentFromUntrustedCluster(req)
+	// find Deployment in the remote cluster
+	deployment, err := k8s.GetDeploymentFromCluster(clients.Remote, req)
 	if err != nil {
-		http.Error(w, "Failed to get deployment object from the untrusted cluster", http.StatusBadRequest)
+		http.Error(w, "Failed to find deployment in remote cluster", http.StatusBadRequest)
 		return
 	}
 
-	// Get Annotaion field value from deployment
-	b64InitData, err := k8s.GetInitDataFromAnnotaion(deployment)
+	// Get Annotation field value from deployment
+	b64InitData, err := k8s.GetInitDataFromAnnotation(deployment)
+	if err != nil {
+		http.Error(w, "Failed to get initData annotation from deployment", http.StatusBadRequest)
+		return
+	}
 	// Decrypt base64 annotation value
 	initData, err := security.DecryptBase64(b64InitData)
 	if err != nil {
@@ -63,7 +65,7 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyRequestBody) {
 	}
 
 	// --- Start policy update ---
-	updatedRego, err := updatePolicyData(policyRego, req)
+	updatedRego, err := updatePolicyData(policyRego, req.Body)
 	if err != nil {
 		http.Error(w, "Failed to update policy data", http.StatusBadRequest)
 		return
@@ -85,20 +87,28 @@ func PatchHandler(w http.ResponseWriter, req types.PolicyRequestBody) {
 		return
 	}
 
-	// --- Patch ref values in trustee ---
-	err = trustee.PatchReferenceValues()
-	if err != nil {
-		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
-		return
-	}
-
-	// --- Apply patch in local cluster ---
-	err = k8s.UpdateAnnotationValue(deployment, newB64InitData, req.Namespace)
+	// --- Apply patch in remote cluster ---
+	err = k8s.UpdateAnnotationValue(clients.Remote, deployment, newB64InitData, req.Body.Namespace)
 	if err != nil {
 		http.Error(w, "Failed to apply patch to k8s cluster", http.StatusBadRequest)
 		return
 	}
-	// NOTE: k8s restarts pods automaticly: see kubectl describe deployment <name> -n <namespace>
+
+	// --- Get new config_mr value from the remote cluster ---
+	newMrConfigId, err := k8s.GetNewMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
+	// TODO: Check if newMrConfigId has valid format. Keine Sonderzeichen etc. Es darf nicht {\n\t\t etc. enthalten.}
+	if err != nil {
+		http.Error(w, "Failed to get new config_mr from remote cluster", http.StatusBadRequest)
+		return
+	}
+
+	// --- Patch reference values in trustee ---
+	err = k8s.UpdateReferenceValues(clients, newMrConfigId, req.Body.OldMrConfigId)
+	if err != nil {
+		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
+		return
+	}
+	// NOTE: k8s restarts pods automatically: see kubectl describe deployment <name> -n <namespace>
 }
 
 /**
@@ -203,10 +213,20 @@ func updatePolicyData(policyRego string, req types.PolicyRequestBody) (string, e
 	return updatedRego, nil
 }
 
+
+
+// ---------- Internal Functions ----------
+
+/**
+* Check if a string slice contains a value
+ */
 func contains(list []string, val string) bool {
 	return slices.Contains(list, val)
 }
 
+/**
+* Remove a value from a string slice
+ */
 func remove(list []string, val string) []string {
 	result := []string{}
 	for _, v := range list {

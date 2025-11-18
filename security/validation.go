@@ -1,55 +1,66 @@
 package security
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"policy-agent/types"
 	"strings"
+	"unicode"
 )
 
-func RequestBodyValidation(req types.PolicyRequest) bool {
-	// NOTE: Check Nonce
-	if req.Body.Nonce == "" {
-		return false
+/**
+* verifyHMAC checks that HMAC(sha256(body) + "." + nonce, secretKey) == givenHMAC
+* payloadHash = SHA256(body)
+* message = payloadHash + "." + nonce
+* expectedHMAC = Base64Encode( HMAC-SHA256(message, secretKey) )
+ */
+func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) error {
+    if len(secretKey) == 0 {
+		return fmt.Errorf("empty secret key")
+	}
+	if nonce == "" {
+		return fmt.Errorf("empty nonce")
+	}
+	givenHMAC = strings.TrimSpace(givenHMAC)
+	
+	// Remove scheme prefix if present
+	const scheme = "HMAC-SHA256 "
+	if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(scheme)) {
+		givenHMAC = strings.TrimSpace(givenHMAC[len(scheme):])
 	}
 
-	// NOTE: compare nonce
-	valid, errMsg := isValidNonce(req.Body.Nonce)
-	if !valid {
-		if errMsg != "" {
-			// TODO: add Logs in read only file here
-			fmt.Printf("Nonce validation failed: %v", errMsg)
-		}
-		return false
+	// Base64-signature decode
+	givenSig, err := base64.StdEncoding.DecodeString(givenHMAC)
+	if err != nil {
+		return fmt.Errorf("bad signature encoding: %w", err)
+	}
+	
+	// Normalize secret key
+	keyRaw, err := normalizeKey(secretKey)
+	if err != nil {
+		return fmt.Errorf("normalize key: %w", err)
 	}
 
-	// HACK Skiped for developing
-	// NOTE: Delete the nonce after successful verification to prevent replay attacks and race conditions
-	// err := deleteNonce(req.Body.Nonce)
-	// if err != nil {
-	// 	return false
-	// }
+	sum := sha256.Sum256(body)
+	hashHex := hex.EncodeToString(sum[:])
 
-	// NOTE: Check Namespace (no namespace == "default")
-	// TODO: if target does not exist in namespace, return false
-	// TODO: Make K8s API call to check if target exists
+	msg := hashHex + "." + nonce
 
-	// BUG removed to test hashing first
-	// pod, err := k8s.GetPod(req.Target, req.Namespace)
-	// log.Printf("%v", pod)
-
-	// NOTE: Is Annotation empty?
-	//TODO: is annotaion field always the same name? If yes: can be removed here
-	// NOTE: Ether Commands or Image must be set
-	// NOTE: Is Deny set? Deafult is ture, to ensure that the policy is not applied by default
-	// TODO:
-
-	return true
+	// calculate HMAC
+	mac := hmac.New(sha256.New, keyRaw)
+	mac.Write([]byte(msg))
+	expected := mac.Sum(nil)
+   
+    if !hmac.Equal(givenSig, expected) {
+        return fmt.Errorf("invalid signature")
+    }
+    return nil
 }
 
 /**
@@ -67,6 +78,43 @@ func CompareHash(data []byte, hashAlgo string, hashValue string) bool {
 		return false
 	}
 	return true
+}
+
+
+
+// ---------- Internal Functions ----------
+
+
+
+/**
+* Normalize secret key from various formats to raw byte slice
+ */
+func normalizeKey(secretKey []byte) ([]byte, error) {
+	s := strings.TrimSpace(string(secretKey))
+
+	// Try Hex first
+	isHex := len(s)%2 == 0
+	if isHex {
+		for _, r := range s {
+			if !unicode.IsDigit(r) && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				isHex = false
+				break
+			}
+		}
+	}
+	if isHex && len(s) >= 64 { // 64 Hex-Characters = 32 Bytes
+		if b, err := hex.DecodeString(s); err == nil {
+			return b, nil
+		}
+	}
+
+	// Try Base64 (if someone encoded the key in b64)
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return b, nil
+	}
+
+	// Otherwise use as delivered (raw)
+	return secretKey, nil
 }
 
 /**

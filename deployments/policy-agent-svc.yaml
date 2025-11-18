@@ -1,0 +1,15 @@
+# deployments/policy-agent-svc.yaml
+# Service for Policy Agent Deployment, damit dieser erreichbar ist
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-agent
+  namespace: policy-agent
+spec:
+  selector:
+    app: policy-agent # muss zu deinem Deployment-Label passen
+  ports:
+    - name: https
+      port: 8443 # Service-Port
+      targetPort: 8443 # ContainerPort (dein Webserver)
+      protocol: TCP

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: confidential-containers-system
+  annotations:
+    io.katacontainers.config.hypervisor.kernel_params: >-
+      agent.aa_kbc_params=cc_kbc::https://10.96.251.206:8080
+      agent.guest_components_rest_api=all
+    io.containerd.cri.runtime-handler: kata-qemu-coco-dev
+spec:
+  containers:
+    - name: nginx
+      image: nginx:latest
+  dnsPolicy: ClusterFirst
+  runtimeClassName: kata-qemu-coco-dev

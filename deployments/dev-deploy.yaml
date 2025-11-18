@@ -1,0 +1,45 @@
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: policy-agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-agent
+  namespace: policy-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: policy-agent }
+  template:
+    metadata:
+      labels: { app: policy-agent }
+    spec:
+      serviceAccountName: policy-agent-sa
+      containers:
+        - name: agent
+          image: policy-agent-dev
+          imagePullPolicy: Never
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_ADDR
+              value: "redis:6379"
+            - name: KBS_NAMESPACE
+              value: "operators"
+            - name: KBS_CONFIG_NAME
+              value: "kbsconfig-sample"
+            - name: REMOTE_API_SERVER_URL
+              value: "https://kind-c2:6443"
+          ports:
+            - containerPort: 8443
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "2Gi"

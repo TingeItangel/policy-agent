@@ -74,24 +74,19 @@ If you have run out of energy or time for your project, put a note at the top of
 - [ ] Kommunikation eines Requests
   - https-protocol mit Server-Client Zertifikate
     - [ ] https mit Challenge-Response schützt Verbindung
-      - [ ] Test: http Anfragen werden abgeleht
-      - [ ] Wie kann ich es noch testen oder reicht es aus?
-    - [ ] Hash über Body-Request und Nonce im Payload eines Requests für Replay-Schutz
+      - [ ] http Anfragen sollen abgeleht werden
+    - [ ] HMAC über Body-Request-Hash + Nonce + secret = Replay-Schutz + Authentication
       - [ ] Nonce kommt vom policy-agent mit einer intialen GET Anfrage
       - [ ] Tolleranzfenster von +- 30 bis 120 Sekunden (dann wird Nonce ungültig)
       - [ ] Was ist mit Timestamp statt Hash? Problem: Zeitverschiebung **Problematisch daher lieber Challenge-Response mit Nonce und Hash vom Server**
             → keine Zeitprobleme. Aber: 2-Request-Workflow → höhere Latenz.
-      - [ ] Client fragt zuerst `GET /nonce` an.
+      - [ ] Client fragt zuerst `GET /auth` an.
       - [ ] Server erstellt einmalige Nonce + Ablaufzeit und merkt sich diese.
-      - [ ] Client sendet diese Nonce im Request mit.
-    - [ ] Payload-Signatur für inhaltliche Authentizität (Hash über Request-Body)
-    - [ ] mTLS + Zertifikat + Policy Check für Identität und Autorisierung
-  - [ ] Signierte Policy-Requests
+      - [ ] Client sendet diese Nonce + sessionid im Request mit.
+    - [ ] Payload-Signatur für inhaltliche Authentizität (Hash über Request-Body) + Signatur: HMAC(Hash + Secret)
     - Der Client (z. B. ein attestierter Pod) signiert die Payload (z. B. mit einem Key aus dem TEE oder KBS/Trustee).
-    - Der Server (policy-agent) prüft die Signatur mit einem bekannten Public Key.
-      - **Zusätzlich zu Hash über Request-Body oder kann das den Hash ersezten? Problem: nur Clients die in TEE laufen können einen Request erstellen?**
     - Der Server validiert:
-      - Nonce ist einzigartig (verhindert Replay & TOCTOU)
+      - Nonce ist einzigartig (**verhindert Replay & TOCTOU**)
       - Signatur ist gültig
   - [ ] Replay Angriffe mit Nonce verhindern => es müssen kürzlich verwendete Nonces zwischengespeichert werden und doppelte oder zu alte Anfragen ablehnen
     - [ ] Wie lange / wie viele Noncen werden zwischengespeichert?
@@ -102,11 +97,16 @@ If you have run out of energy or time for your project, put a note at the top of
 1. Client holt Nonce mit GET-Request
 
 ```zsh
-curl -k https://policy-agent:8443/nonce
-# Antwort: {"nonce":"abc123..."}
+curl -k https://policy-agent:8443/auth
+# Antwort: {"nonce":"abc123...", "sessionID":"uuid-..."}
 ```
 
-Server erstellt zufällige Nonce, speichert sie temporär mit kurzer Ablaufzeit (z. B. 30 Sekunden) und gibt sie zurück. 2. Client sendet POST-Request + Nonce
+Authorization: HMAC-SHA256 <base64(signature)>
+
+- X-Alg: HMAC-SHA256
+- X-Timestamp: 2025-11-09T08:30:00Z (RFC3339/ISO8601, UTC)
+- X-Nonce: <zufällige UUID>
+- X-Content-SHA256: <hex(sha256(payload-bytes))>
 
 ```zsh
 curl -k -X POST https://policy-agent:8443/patch \
@@ -115,7 +115,7 @@ curl -k -X POST https://policy-agent:8443/patch \
 
 ```
 
-3. Server prüft:
+1. Server prüft:
 
 - Nonce existiert noch.
 - Nonce ist nicht abgelaufen.
@@ -125,9 +125,14 @@ curl -k -X POST https://policy-agent:8443/patch \
 
 ## Database
 
-`sudo docker run -d --name redis -p 6379:6379 redis:7`
-`sudo docker logs -f redis`
-if redis db exited: `sudo docker start redis`
+```bash
+# start redis in kubernetes cluster
+kubectl apply -f ./deployments//redis.yaml
+# check redis pod logs
+kubectl logs -f redis-xxxx -n policy-agent
+# podforwarding for local testing and development
+kubectl port-forward svc/redis 6379:6379
+```
 
 ## Logging
 
@@ -365,7 +370,8 @@ Wenn du also z. B. wirklich absichern willst, dass:
 
 🔐 1. Principle: “API access = control”
 
-Anyone with access to the Kubernetes API server can change workloads.\*\*\*\*
+Anyone with access to the Kubernetes API server can change workloads.
+
 So the connection between trusted → untrusted must be locked down with the same care as root access.
 
 🛠 2. Minimal RBAC in the untrusted cluster
@@ -497,3 +503,132 @@ namespace: kube-system
 resourceVersion: "81137"
 uid: 00848df3-cd0e-4e1d-a60d-5c580f83b9a0
 type: kubernetes.io/service-account-token
+
+# Port Forwarding Redis for Local Development
+
+```bash
+kubectl port-forward svc/redis -n policy-agent 6379:6379
+```
+
+# Example https Request with Curl
+
+```bash
+# Authenticate and get a session information
+# ssl-no-revoke to skip certificate revocation check for self-signed certs
+curl --ssl-no-revoke https://localhost:8443/auth
+# alternatively with client certs:
+curl --cacert ca.crt https://localhost:8443/auth
+```
+
+## Ablauf der Installation
+
+### Remote Cluster with Coco
+
+1. ServiceAccount im Remote-Cluster anlegen + RBAC.
+
+- `kubectl apply -f ./deployments/remoteCluster-rbac.yaml`
+- WICHTIG: die RBAC Regeln müssen so gesetzt werden, dass nur die nötigsten Rechte vergeben werden (z. B. nur auf Deployments im namespace `confidential-containers-system` oder `operators`).
+
+2. ServiceAccount Token im Remote-Cluster erzeugen:
+   - `kubectl -n confidential-containers-system create token policy-agent-sa > /tmp/policy-agent-sa.token`
+
+- WICHTIG: die token datei wird im lokalen Cluster im policy-agent Pod als secret gemountet.
+
+3. CA holen (vom Remote-Cluster):
+   cluster-context anpassen! (kind-c1 ist nur ein beispiel)
+
+```bash
+kubectl config view --raw -o jsonpath='{.clusters[?(@.name=="kind-c1")].cluster.certificate-authority-data}' \
+| base64 -d > /tmp/remote.ca.crt
+```
+
+4. API-Server-URL des Remote-Clusters aus kubeconfig:
+   cluster-context anpassen! (kind-c1 ist nur ein beispiel)
+
+```bash
+kubectl config view -o jsonpath='{.clusters[?(@.name=="kind-c1")].cluster.server}'
+```
+
+5. Deployments die gepatcht werden sollen im Remote-Cluster anpassen
+
+- Es muss folgender command erlaubt sein:
+
+```bash
+`curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
+		 | jq -r '.token' \
+		 | cut -d '.' -f2 \
+		 | base64 -d \
+		 | jq -r '.submods.cpu."ear.veraison.annotated-evidence".tdx.quote.body.mr_config_id'`,
+```
+
+- Es müssen api calls vom Pod zur Guest-CVM erlaubt sein, um den Token zu bekommen:`io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"`
+
+### Trusted Cluster
+
+1. redis im trusted Cluster deployen (z. B. im namespace policy-agent)
+   - `kubectl apply -f ./deployments/redis.yaml`
+2. rbac für den policy-agent anlegen
+
+- `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
+
+3. policy-agent service erstellen, um den pod erreichbar zu machen (ClusterIP oder NodePort)
+
+- `kubectl apply -f ./deployments/service-policy-agent.yaml`
+
+4. policy-agent deployment erstellen
+
+- `kubectl apply -f ./deployments/deployment-policy-agent.yaml`
+- WICHTIG: im Deployment yaml müssen die ENV Variablen für den remote cluster gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
+  - `REDIS_ADDR`: redis:6379 (wenn im gleichen namespace deployed)
+  - `KBS_NAMESPACE`: namespace in dem trustee auf dem lokalen cluster läuft (z. B. confidential-containers-system oder operators)
+  - `REMOTE_API_SERVER_URL`: URL des API-Servers des remote clusters (z. B. https://<remote-cluster-ip>:6443)
+
+5. Secrets im lokalen Cluster anlegen (remote-cluster-cred im Namespace `policy-agent`)
+
+```bash
+kubectl -n policy-agent create secret generic remote-cluster-cred \
+  --from-literal=api-server-url="https://<remote-apiserver>" \
+  --from-file=token=/tmp/policy-agent-sa.token \
+  --from-file=ca.crt=/tmp/remote.ca.crt
+```
+
+# Limitationen oder offene Fragen
+
+- [ ] mehrere keys werden unter dem gleichen k8s secret gespeichert. Gibt es eine Limitation der Größe von k8s secrets? Sonst müsste für jede session ein eigenes secret angelegt werden. Wie verhält sich das k8s system wenn ganz viele secrets angelegt werden?
+- [ ] Es wird hart auf essentielle Regeln in der `.toml` Datei geprüft. Wie kann ich das flexibler gestalten? Problem: initData Datei mit kann komplett frei gestaltet werden.
+
+# Entscheidung:
+
+## Vor-Hash des Payloads – ja oder nein?
+
+Direkt HMAC über den Body: korrekt, einfach, aber du musst denselben Bytestrom exakt signieren (inkl. Whitespaces).
+
+Vor-Hash (empfohlen): du signierst eine kleine kanonische Zeichenkette und nur den Hash des Bodys. Das ist bei großen Bodies effizienter und ergibt eine klarere Trennung von „Inhalt“ und „Metadaten“. Es ist das gängigste Muster (z. B. AWS SigV4 rechnet auch SHA256(payload) und signiert dann Metadaten + diesen Hash).
+
+Wenn du JSON kanonisieren willst (Leerzeichen/Key-Order), brauchst du eine definierte Serialisierung – für den Anfang reicht der rohe Body-Hash.
+
+# Reuqest Payload Beispiel
+
+```json
+{
+  "target": "my-deployment",
+  "namespace": "default",
+  "annotation": "kata-policy",
+  "commands": ["echo", "hello"],
+  "image": "nginx:latest",
+  "isDeployment": true,
+  "deny": true,
+  "nonce": "abc"
+}
+```
+
+🧩 Grundgedanke
+
+HMAC sichert Integrität und Authentizität einer Nachricht.
+Aber: es schützt nicht automatisch gegen Wiederverwendung (Replay) derselben Nachricht.
+
+payloadHash = SHA256(body)
+message = payloadHash + nonce
+expectedSignature = Base64Encode( HMAC-SHA256(message, secretKey) )
+
+#

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-deployment
+  template:
+    metadata:
+      labels:
+        app: nginx-deployment
+      annotations:
+        io.katacontainers.config.runtime.cc_init_data: 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
+        io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"
+    spec:
+      containers:
+        - name: nginx-deployment
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+      dnsPolicy: ClusterFirst

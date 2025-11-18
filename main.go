@@ -1,44 +1,78 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
-	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
-	"os"
 	redis "policy-agent/database"
 	"policy-agent/k8s"
 	"policy-agent/patch"
 	"policy-agent/security"
 	"policy-agent/types"
+	"strings"
+	"time"
 
 	"io"
 	"log"
 	"net/http"
 )
 
-func handler(w http.ResponseWriter, r *http.Request) {
+func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
+	// --- Handle HTTP Methods ---
 	switch r.Method {
 
+
+	// --- GET /auth ---
 	case http.MethodGet:
-		// --- GET /nonce ---
-		success, nonce := security.GetNewNonce()
-		if !success {
-			http.Error(w, "Failed to get nonce", http.StatusBadRequest)
+		// --- Generate session data ---
+		var session redis.SessionData
+		session.ID = security.NewNonce()
+		session.Nonce = security.NewNonce()
+		session.SecretKey = security.NewSecretKey()
+		session.TTL = 5 * time.Minute // 5 minutes
+
+		// --- Save data in redis db ---
+		err := redis.SaveSessionData(session)
+		if err != nil {
+			http.Error(w, "Failed to save session data: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"nonce": nonce})
+		
+		// DEBUG ---- REMOVE THIS TEST AFTER TESTING ----
+		sessionTest, err := redis.GetSessionData(session.ID)
+		if err != nil {
+			http.Error(w, "Failed to retrieve session data after saving: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Retrieved session after saving: ID=%s, Nonce=%s, SecretKey=%x", sessionTest.ID, sessionTest.Nonce, sessionTest.SecretKey)
+		// DEBUG ---- REMOVE THIS TEST AFTER TESTING ----
 
+		// --- Store session.secretKey in Trustee ---
+		err = k8s.StoreSessionInTrustee(clients, r.Context(), session)
+		if err != nil {
+			http.Error(w, "Failed to store session data in trustee: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// FIXME RETURNING SECRET KEY IN RESPONSE FOR TESTING PURPOSES ONLY
+		log.Printf("Session stored in trustee: ID=%s, Nonce=%s, SecretKey=%x", session.ID, session.Nonce, session.SecretKey)
+		// --- Return session id and nonce to client ---
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"session_id": session.ID, "nonce": session.Nonce, "secret_key": hex.EncodeToString(session.SecretKey)})
+
+
+	// --- POST /patch ---
 	case http.MethodPost:
-		// --- POST /patch ---
 		var req types.PolicyRequest
 
-		req.Header.HashAlgo = r.Header.Get("X-Hash-Algorithm")
-		req.Header.HashValue = r.Header.Get("X-Hash-Value")
+		req.Header.Nonce = r.Header.Get("X-Nonce") // e.g. "cce471c3-1d85-4787-8299-f5c222c2a82f"
+		req.Header.HashAlgo = r.Header.Get("X-Hash-Algorithm") // e.g. "SHA256"
+		req.Header.HashValue = r.Header.Get("X-Hash-Value") // SHA256<req.body> e.g. "abcdef123456..."
+		req.Header.HMAC = r.Header.Get("Authorization") // e.g. "HMAC-SHA256 base64signature"
 
 		// --- Parse Body to PolicyRequest type ---
-		// Read raw request body
-		data, err := io.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body) // Read raw request body
 		defer r.Body.Close()
 		if err != nil {
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -50,36 +84,62 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// TODO: replace with signiture check or use both!
-		// FIXME: Hash has difference. Why is this?
-		// Validate Nonce
-		// if !security.ValidateNonce(req.Body.Nonce) {
-		// 	http.Error(w, "Invalid or reused nonce", http.StatusUnauthorized)
-		// 	return
-		// }
+		// Check supported hash algorithm
+		algo := strings.ToUpper(req.Header.HashAlgo)
+		if algo != "SHA256" {
+			http.Error(w, "unsupported X-Hash-Algorithm", http.StatusBadRequest)
+			return
+		}
 
-		// Validate Hash
+		// --- Validate Body Hash ---
+		sum := sha256.Sum256(data)
+		hashHex := hex.EncodeToString(sum[:])
+		if !strings.EqualFold(hashHex, req.Header.HashValue) {
+			http.Error(w, "content hash mismatch", http.StatusUnauthorized)
+			return
+		}
 
-		// validHash := security.CompareHash(canonicalJSON, req.Header.HashAlgo, req.Header.HashValue)
-		// if !validHash {
-		// 	http.Error(w, "Invalid Hash", http.StatusBadRequest)
-		// 	return
-		// }
+		// Get Session data from redis for validation
+		savedSession, err := redis.GetSessionData(req.Body.SessionID)
+		if err != nil {
+			http.Error(w, "Failed to retrieve session data: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-		// HACK Skiped for developing. Has to be added again !!!
-		// NOTE: --- Validate request body fields ---
-		// valid := security.RequestBodyValidation(req)
-		// if !valid {
-		// 	http.Error(w, "Invalid request body", http.StatusBadRequest)
-		// 	return
-		// }
+		// --- Validate Redis Session ---
+		// Check TTL of Nonce
+		if savedSession.TTL <= 0 {
+			// Delete session data from Redis
+			_ = redis.DeleteSessionData(savedSession.ID)
+			http.Error(w, "Session has expired", http.StatusUnauthorized)
+			return
+		}
+		// compare nonce to saved one
+		if subtle.ConstantTimeCompare([]byte(req.Header.Nonce), []byte(savedSession.Nonce)) != 1 {
+			http.Error(w, "invalid nonce", http.StatusUnauthorized)
+			return
+		}
 
+		// --- HMAC Verification ---
+		err = security.VerifyHMAC(data, req.Header.Nonce, req.Header.HMAC, savedSession.SecretKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		log.Printf("Patch request verified successfully for session %s", req.Body.SessionID)
+		
 		// --- Run Patch ---
-		patch.PatchHandler(w, req.Body)
+		patch.PatchHandler(clients, w, req)
 
-		log.Printf("Patched deployment %s/%s with images: %v",
-			req.Body.Namespace, req.Body.DeploymentName, req.Body.Images)
-
+		// --- Delete session from trustee ---
+		err = k8s.DeleteTrusteeSession(clients, savedSession)
+		if err != nil {
+			log.Printf("Failed to delete session data from trustee: %v", err)
+		}
+		// --- Nonce/Session consumption (Replay protection) ---
+		_ = redis.DeleteSessionData(savedSession.ID)
+	
 		w.Write([]byte("Patched successfully\n"))
 
 	default:
@@ -88,60 +148,73 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// --- Init --
-	// Initialize Redis client
-	if err := redis.InitRedis("localhost:6379", "", 0); err != nil {
+	
+	// --- Initialize Redis client ---
+	if err := redis.InitRedis(); err != nil {
 		log.Fatalf("Redis init failed: %v", err)
 	}
-	// BUG: REPLACE REDIS WHEN TESTING IN CLUSTER
-	// if err := redis.InitRedis("redis:6379", "", 0); err != nil {
-	// 	log.Fatalf("Redis init failed: %v", err)
-	// }
-	// Initialize Kubernetes client
-	if err := k8s.InitTrusted(); err != nil {
-		log.Fatalf("trusted cluster init failed: %v", err)
-	}
-	// Untrusted cluster (via mounted SA token + CA)
-	// TODO get url from deployment env variable
-	apiServerURL := "https://192.168.178.37:6443" // from kubectl cluster-info
+	// DEBUG MAKE SURE REMOTE CLUSTER IS CONNECTABLE
+	// DEBUG CURRENTLY ONLY LOCAL CLUSTER IS USED
+	// --- Initialize Kubernetes clients ---
+	clients, err := k8s.InitClients()
+	if err != nil { log.Fatal(err) }
 
-	if err := k8s.InitUntrusted(apiServerURL); err != nil {
-		log.Fatalf("Failed to init untrusted cluster: %v", err)
+	// DEBUG Ping both clusters to verify connectivity. REMOVE after testing
+	// _ = k8s.PingAPI(context.Background(), clients.Local)
+	// _ = k8s.PingAPI(context.Background(), clients.Remote)
+	log.Println("Kubernetes clients initialized successfully.")
+	// --- Check ServiceAccount existence ---
+	// ServiceAccount used by policy-agent in local cluster for trustee
+	err = k8s.CheckServiceAccountExists(clients)
+	if err != nil {
+		log.Fatalf("ServiceAccount check failed: %v", err)
 	}
-
-	// TODO: Get needed Keys from Trustee
-	// TODO: Load Key of TEE to check signiture
 
 	// --- Set up the HTTP server with TLS ---
-	// Handle GET request to generate a nonce and return it to the client
-	http.HandleFunc("/nonce", handler)
+	// Handle GET request to init a session
+	http.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		handler(w, r, clients)
+	})
 	// Handle POST request to apply a policy update
-	http.HandleFunc("/patch", handler)
+	http.HandleFunc("/patch",  func(w http.ResponseWriter, r *http.Request) {
+		handler(w, r, clients)
+	})
+
+	// TODO Run Cleanup routine to delete expired nonces/sessions in redis and trustee after certain interval
+	// Get expired sessions from redis
+	// expiredSessions, err := redis.GetExpiredSessions()
+	// if err != nil {
+	// 	log.Printf("Failed to get expired sessions from redis: %v", err)
+	// }
+
+	// // Delete sessions from trustee
+	// for _, session := range expiredSessions {
+	// 	if err := k8s.DeleteTrusteeSession(clients, session); err != nil {
+	// 		log.Printf("Failed to delete session from trustee: %v", err)
+	// 	}
+	// }
 
 	// --- Certification setup ---
-	// Load the CA certificate
-	// TODO Should the certificate be loaded from trustee or from a file?
-	// For now, we load it from a file.
-	caCert, err := os.ReadFile("ca.crt")
-	if err != nil {
-		log.Fatal("could not read ca cert:", err)
-	}
+	// Load the CA certificate from env
+	// caCert := os.Getenv("CA_CERT") // root of trust - only certificates signed by this CA are accepted
+	// if caCert == "" {
+	// 	log.Fatal("CA_CERT environment variable not set")
+	// }
+	//caCertPool := x509.NewCertPool() // Create a CA certificate pool. Server uses this to verify client certificates (is client cert signed by trusted CA?)
+	//caCertPool.AppendCertsFromPEM([]byte(caCert))
 
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
+	// NOTE: In this setup, we are not using client certificates, but the server could be configured to require them.
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    caCertPool,
+		ClientAuth:   tls.NoClientCert,
 		MinVersion:   tls.VersionTLS12,
 	}
 
-	cert, err := tls.LoadX509KeyPair("server.crt", "server.key")
+	cert, err := tls.LoadX509KeyPair("assets/server.crt", "assets/server.key") // server's own public cert + private key
 	if err != nil {
 		log.Fatal("failed to load server cert/key:", err)
 	}
-	tlsConfig.Certificates = []tls.Certificate{cert}
+	tlsConfig.Certificates = []tls.Certificate{cert} // configure server to use this cert/key pair
 
 	server := &http.Server{
 		Addr:      ":8443",
@@ -150,9 +223,9 @@ func main() {
 
 	// --- Start https server ---
 	log.Println("Starting HTTPS server on :8443...")
-	err = server.ListenAndServeTLS("cert.pem", "key.pem")
+	err = server.ListenAndServeTLS("", "") // cert and key are already configured in tlsConfig
 	if err != nil {
 		log.Fatal(err)
 	}
-	// BUG:Can the server crash? If yes the pod should be restartet. Is that possible to do?
+	// IDEA Can the server crash? If yes the pod should be restarted. Is that possible to do?
 }

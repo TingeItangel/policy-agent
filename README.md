@@ -596,17 +596,16 @@ curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
 
 - `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
 
-### 3. policy-agent service erstellen, um den Pod von außen erreichbar zu machen (NodePort oder LoadBalancer)
-
-- `kubectl apply -f ./deployments/service-policy-agent.yaml`
-
-### 4. policy-agent Deployment erstellen
+### 3. policy-agent Deployment erstellen
 
 - `kubectl apply -f ./deployments/deployment-policy-agent.yaml`
 - **WICHTIG**: im Deployment yaml müssen die ENV Variablen für den remote cluster gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
   - `REDIS_ADDR`: redis:6379 (wenn im gleichen namespace deployed)
   - `KBS_NAMESPACE`: namespace in dem trustee auf dem lokalen cluster läuft (z. B. confidential-containers-system oder operators)
   - `REMOTE_API_SERVER_URL`: URL des API-Servers des remote clusters (z. B. https://<remote-cluster-ip>:6443)
+- policy-agent service wird automatisch mit dem Deployment erstellt.
+  - Je nach Netzwerksetup muss der service typ angepasst werden (ClusterIP, NodePort, LoadBalancer) und extern erreichbar gemacht werden.
+  - Hier: LoadBalancer mit metallb auf dem lokalen cluster.
 
 ### 5. Secrets im lokalen Cluster anlegen (remote-cluster-cred im Namespace `policy-agent`)
 

@@ -64,3 +64,17 @@ spec:
         - name: remote-cluster-cred
           secret:
             secretName: remote-cluster-cred
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-agent
+  namespace: policy-agent
+spec:
+  type: LoadBalancer
+  selector:
+    app: policy-agent
+  ports:
+    - name: https
+      port: 443 # External-Port
+      targetPort: 8443 # Container-Port (Go-HTTPS-Server)

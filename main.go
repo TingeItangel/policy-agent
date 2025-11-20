@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
@@ -153,18 +154,19 @@ func main() {
 	if err := redis.InitRedis(); err != nil {
 		log.Fatalf("Redis init failed: %v", err)
 	}
-	// DEBUG MAKE SURE REMOTE CLUSTER IS CONNECTABLE
-	// DEBUG CURRENTLY ONLY LOCAL CLUSTER IS USED
+
 	// --- Initialize Kubernetes clients ---
 	clients, err := k8s.InitClients()
 	if err != nil { log.Fatal(err) }
 
-	// DEBUG Ping both clusters to verify connectivity. REMOVE after testing
-	// _ = k8s.PingAPI(context.Background(), clients.Local)
-	// _ = k8s.PingAPI(context.Background(), clients.Remote)
+	// --- Ping Kubernetes API servers to verify connectivity ---
+	err = k8s.PingAPI(context.Background(), clients)
+	if err != nil {
+		log.Fatalf("Kubernetes API ping failed: %v", err)
+	}
 	log.Println("Kubernetes clients initialized successfully.")
+	
 	// --- Check ServiceAccount existence ---
-	// ServiceAccount used by policy-agent in local cluster for trustee
 	err = k8s.CheckServiceAccountExists(clients)
 	if err != nil {
 		log.Fatalf("ServiceAccount check failed: %v", err)
@@ -180,29 +182,7 @@ func main() {
 		handler(w, r, clients)
 	})
 
-	// TODO Run Cleanup routine to delete expired nonces/sessions in redis and trustee after certain interval
-	// Get expired sessions from redis
-	// expiredSessions, err := redis.GetExpiredSessions()
-	// if err != nil {
-	// 	log.Printf("Failed to get expired sessions from redis: %v", err)
-	// }
-
-	// // Delete sessions from trustee
-	// for _, session := range expiredSessions {
-	// 	if err := k8s.DeleteTrusteeSession(clients, session); err != nil {
-	// 		log.Printf("Failed to delete session from trustee: %v", err)
-	// 	}
-	// }
-
 	// --- Certification setup ---
-	// Load the CA certificate from env
-	// caCert := os.Getenv("CA_CERT") // root of trust - only certificates signed by this CA are accepted
-	// if caCert == "" {
-	// 	log.Fatal("CA_CERT environment variable not set")
-	// }
-	//caCertPool := x509.NewCertPool() // Create a CA certificate pool. Server uses this to verify client certificates (is client cert signed by trusted CA?)
-	//caCertPool.AppendCertsFromPEM([]byte(caCert))
-
 	// NOTE: In this setup, we are not using client certificates, but the server could be configured to require them.
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{},
@@ -227,5 +207,4 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// IDEA Can the server crash? If yes the pod should be restarted. Is that possible to do?
 }

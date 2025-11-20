@@ -85,8 +85,7 @@ func SaveSessionData(data SessionData) (error) {
 }
 
 /**
-* Get session data from redis database
-* return: SessionData struct and error message
+* Get Nonce and SecretKey from redis database by sessionID
  */
 func GetSessionData(sessionID string) (SessionData, error) {
 	if rdb == nil {
@@ -96,31 +95,37 @@ func GetSessionData(sessionID string) (SessionData, error) {
 		return SessionData{}, fmt.Errorf("empty sessionID")
 	}
 
-	// TODO: Decrypt value with TEE Key
+	key := "session:" + sessionID
 
-	// Get the nonce value from Redis
-	val, err := rdb.Get(ctx, nonce).Result()
-	if err == redis.Nil {
-		return "", 0, fmt.Errorf("nonce %s does not exist", nonce)
-	} else if err != nil {
-		return "", 0, err
-	}
-
-	// get TTL of the nonce
-	ttl, err := rdb.TTL(ctx, nonce).Result()
+	// Load hash fields
+	m, err := rdb.HGetAll(ctx, key).Result()
 	if err != nil {
-		return SessionData{}, err
+		return SessionData{}, fmt.Errorf("failed to get session hash: %w", err)
 	}
+
+	// If the key does not exist or is empty
 	if len(m) == 0 {
-		// Key exists, but no hash? (or just expired)
+		return SessionData{}, ErrSessionNotFound
+	}
+
+	// Get TTL of the key
+	ttl, err := rdb.TTL(ctx, key).Result()
+	if err != nil {
+		return SessionData{}, fmt.Errorf("failed to get session TTL: %w", err)
+	}
+
+	nonce, okNonce := m["nonce"]
+	secret, okSecret := m["secret_key"]
+	if !okNonce || !okSecret {
+		// Hash exists, but fields do not => corrupted session
 		return SessionData{}, ErrSessionNotFound
 	}
 
 	sessionData := SessionData{
-		ID:       sessionID,
-		Nonce:    m["nonce"],
-		SecretKey: []byte(m["secret_key"]),
-		TTL:      ttl,
+		ID:        sessionID,
+		Nonce:     nonce,
+		SecretKey: []byte(secret),
+		TTL:       ttl,
 	}
 	return sessionData, nil
 }

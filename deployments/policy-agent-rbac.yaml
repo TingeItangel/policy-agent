@@ -113,7 +113,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: patcher-role
-  namespace: default # Ziel-Namespace!
+  namespace: default
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -123,11 +123,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: patcher-binding
-  namespace: default # gleich wie die Role
+  namespace: default
 subjects:
   - kind: ServiceAccount
     name: policy-agent-sa
-    namespace: policy-agent # << hier dein Pod-SA
+    namespace: policy-agent
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -139,7 +139,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: pod-editor
-  namespace: default
+  namespace: policy-agent
 rules:
   # Basic pod operations in default namespace
   - apiGroups: [""]
@@ -147,7 +147,6 @@ rules:
     verbs:
       ["get", "list", "watch", "create", "update", "patch", "delete", "exec"]
 
-  # Optional: allow exec and logs on pods
   - apiGroups: [""]
     resources: ["pods/exec", "pods/log"]
     verbs: ["get", "create"]
@@ -156,7 +155,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: pod-editor-binding
-  namespace: default
+  namespace: policy-agent
 subjects:
   - kind: ServiceAccount
     name: policy-agent-sa

@@ -253,7 +253,6 @@ Starten des Https servers: `go run main.go`
 curl https://localhost:8443/auth
 ```
 
-
 ```zsh
 POST /policy HTTP/1.1
 Content-Type: application/json
@@ -350,10 +349,9 @@ Wenn du also z. B. wirklich absichern willst, dass:
 
 … dann brauchst du eine Anwendungsebene-Nonce + Signatur.
 
-
 # Ideas
-- sealed secrets für Keys zum Ver-/Entschlüsseln?
 
+- sealed secrets für Keys zum Ver-/Entschlüsseln?
 
 - TPM- Harware sicheheitsmoudle die Schlüssel verwlten (verfügbarkeit der Schlüssel gewährleisten und zu schützen)
   - non-voleteil Keys zu speichern
@@ -364,6 +362,7 @@ Wenn du also z. B. wirklich absichern willst, dass:
 - Requester schickte Quote an Agent => Agent schickt Quote an AS von Trustee => Attestierung => Okay?
   - Frage: Wie kommt Workload an Quote. Nur CVM Guest-components haben Zugriff darauf. Workload ist absichtlich davon isoliert
   - Wie findet der API Request zwischen Coco Guest-Komponenten und Trustee statt? Dies muss auch irgendwie gehen. Idee: Workload schickt Request, Policy-Agenten schickt darauf einen Request an die API von der Guest-Komponente um Quote zu bekommen? Wie geht das?
+
 # KBS Protocol
 
 # Remote Access from trusted cluster in untrusted cluster
@@ -520,70 +519,98 @@ curl --ssl-no-revoke https://localhost:8443/auth
 curl --cacert ca.crt https://localhost:8443/auth
 ```
 
-## Ablauf der Installation
+# Ablauf der Installation
 
-### Remote Cluster with Coco
+## Remote Cluster with Coco
 
-1. ServiceAccount im Remote-Cluster anlegen + RBAC.
+### 1. ServiceAccount im Remote-Cluster anlegen + RBAC.
 
 - `kubectl apply -f ./deployments/remoteCluster-rbac.yaml`
-- WICHTIG: die RBAC Regeln müssen so gesetzt werden, dass nur die nötigsten Rechte vergeben werden (z. B. nur auf Deployments im namespace `confidential-containers-system` oder `operators`).
+- WICHTIG: die RBAC Regeln müssen so gesetzt werden, dass nur die nötigsten Rechte vergeben werden (z. B. nur auf Deployments im namespace `default` oder `operators`).
 
-2. ServiceAccount Token im Remote-Cluster erzeugen:
-   - `kubectl -n confidential-containers-system create token policy-agent-sa > /tmp/policy-agent-sa.token`
-
-- WICHTIG: die token datei wird im lokalen Cluster im policy-agent Pod als secret gemountet.
-
-3. CA holen (vom Remote-Cluster):
-   cluster-context anpassen! (kind-c1 ist nur ein beispiel)
+### 2. ServiceAccount Token im Remote-Cluster erzeugen:
 
 ```bash
-kubectl config view --raw -o jsonpath='{.clusters[?(@.name=="kind-c1")].cluster.certificate-authority-data}' \
-| base64 -d > /tmp/remote.ca.crt
+kubectl -n default create token policy-agent-sa --duration=8760h > /tmp/policy-agent-sa.token
+
+# Beispiel Ausgabe:
+cat policy-agent-sa.token
+# eyJhbGciOiJSUzI1NiIsImtpZCI6IkVHUkUza3Y1YTZ6OUp6dTVHbWVFSzM2WmRMdWdPZ3V5Q1BSYzgyTFZmUWMifQ....
 ```
 
-4. API-Server-URL des Remote-Clusters aus kubeconfig:
-   cluster-context anpassen! (kind-c1 ist nur ein beispiel)
+- WICHTIG: Die Token Datei wird im lokalen Cluster im policy-agent Pod als secret gemountet.
+
+### 3. CA holen (vom Remote-Cluster):
+
+cluster-name anpassen! (kubernetes ist nur ein beispiel)
 
 ```bash
-kubectl config view -o jsonpath='{.clusters[?(@.name=="kind-c1")].cluster.server}'
+# CA des Remote-Clusters aus kubeconfig:
+CLUSTER_NAME=$(kubectl config view -o jsonpath='{.contexts[?(@.name=="'$(kubectl config current-context)'")].context.cluster}')
+
+kubectl config view --raw -o jsonpath="{.clusters[?(@.name==\"$CLUSTER_NAME\")].cluster.certificate-authority-data}" | base64 -d > /tmp/remote.ca.crt
+
+# Beispiel Ausgabe:
+cat remote.ca.crt
+# -----BEGIN CERTIFICATE-----
+# MIIDBTCCAe2gAwIBAgIIFZ+wWjIbNjowDQYJKoZIhvcNAQ...
+# -----END CERTIFICATE-----
 ```
 
-5. Deployments die gepatcht werden sollen im Remote-Cluster anpassen
+### 4. API-Server-URL des Remote-Clusters aus kubeconfig
+
+```bash
+CLUSTER_NAME=$(kubectl config view -o jsonpath='{.contexts[?(@.name=="'$(kubectl config current-context)'")].context.cluster}')
+
+kubectl config view -o jsonpath="{.clusters[?(@.name==\"$CLUSTER_NAME\")].cluster.server}"
+# Beispiel Ausgabe:
+# https://<remote-cluster-ip>:6443
+
+# oder als Datei speichern:
+kubectl config view --raw -o jsonpath="{.clusters[?(@.name==\"$CLUSTER_NAME\")].cluster.server}" > /tmp/remote.api-server-url
+```
+
+### 5. Remote-Cluster-Deployments anpassen, welche vom Policy-Agent verändert werden sollen
 
 - Es muss folgender command erlaubt sein:
 
 ```bash
-`curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
+curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
 		 | jq -r '.token' \
 		 | cut -d '.' -f2 \
 		 | base64 -d \
-		 | jq -r '.submods.cpu."ear.veraison.annotated-evidence".tdx.quote.body.mr_config_id'`,
+		 | jq -r '.submods.cpu."ear.veraison.annotated-evidence".tdx.quote.body.mr_config_id'`
 ```
 
-- Es müssen api calls vom Pod zur Guest-CVM erlaubt sein, um den Token zu bekommen:`io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"`
+- Es müssen API-Calls vom Pod zur Guest-CVM erlaubt sein, um den Token zu bekommen: `io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"`
 
-### Trusted Cluster
+  Ansonsten ist der API-Call vom Pod zur Guest-CVM nicht möglich.
 
-1. redis im trusted Cluster deployen (z. B. im namespace policy-agent)
-   - `kubectl apply -f ./deployments/redis.yaml`
-2. rbac für den policy-agent anlegen
+## Local Cluster
+
+### 1. Redis im local Cluster starten (z. B. im namespace policy-agent)
+
+- `kubectl apply -f ./deployments/redis.yaml`
+
+### 2. rbac für den policy-agent anlegen
 
 - `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
 
-3. policy-agent service erstellen, um den pod erreichbar zu machen (ClusterIP oder NodePort)
+### 3. policy-agent service erstellen, um den Pod von außen erreichbar zu machen (NodePort oder LoadBalancer)
 
 - `kubectl apply -f ./deployments/service-policy-agent.yaml`
 
-4. policy-agent deployment erstellen
+### 4. policy-agent Deployment erstellen
 
 - `kubectl apply -f ./deployments/deployment-policy-agent.yaml`
-- WICHTIG: im Deployment yaml müssen die ENV Variablen für den remote cluster gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
+- **WICHTIG**: im Deployment yaml müssen die ENV Variablen für den remote cluster gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
   - `REDIS_ADDR`: redis:6379 (wenn im gleichen namespace deployed)
   - `KBS_NAMESPACE`: namespace in dem trustee auf dem lokalen cluster läuft (z. B. confidential-containers-system oder operators)
   - `REMOTE_API_SERVER_URL`: URL des API-Servers des remote clusters (z. B. https://<remote-cluster-ip>:6443)
 
-5. Secrets im lokalen Cluster anlegen (remote-cluster-cred im Namespace `policy-agent`)
+### 5. Secrets im lokalen Cluster anlegen (remote-cluster-cred im Namespace `policy-agent`)
+
+- policy-agent-sa-token und remote.ca.crt müssen im lokalen Cluster als secret angelegt werden:
 
 ```bash
 kubectl -n policy-agent create secret generic remote-cluster-cred \
@@ -631,4 +658,6 @@ payloadHash = SHA256(body)
 message = payloadHash + nonce
 expectedSignature = Base64Encode( HMAC-SHA256(message, secretKey) )
 
-#
+# Ideen:
+
+- [ ] Server Zertifikat von außen beziehen? Als Secret in dem pod mounten?

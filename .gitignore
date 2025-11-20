@@ -1,0 +1,72 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# IDEs / editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+*.iml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment / secrets
+.env
+.env.*.local
+.env.local
+secrets.yml
+credentials
+*.pem
+*.key
+/tmp/*
+
+# Node
+node_modules/
+dist/
+build/
+.cache/
+npm-debug.log*
+
+# Go
+bin/
+pkg/
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+coverage.out
+
+# Rust
+/target/
+
+# Java / JVM
+*.class
+*.jar
+*.war
+*.ear
+target/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Misc
+*.swp
+*.swo
+*.bak
+*.orig
+*.tmp

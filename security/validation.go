@@ -15,7 +15,7 @@ import (
 )
 
 /**
-* verifyHMAC checks that HMAC(sha256(body) + "." + nonce, secretKey) == givenHMAC
+* checks that HMAC(sha256(body) + "." + nonce, secretKey) == givenHMAC
 * payloadHash = SHA256(body)
 * message = payloadHash + "." + nonce
 * expectedHMAC = Base64Encode( HMAC-SHA256(message, secretKey) )

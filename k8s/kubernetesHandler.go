@@ -3,9 +3,7 @@ package k8s
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"policy-agent/types"
@@ -59,20 +57,16 @@ func InitClients() (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("local client: %w", err)
 	}
-	// TODO Change back to passing local client to newRemoteClient
-	// FIXME Currently both clients are the same (local) for testing
-	//remote, err := newRemoteClient(local)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("remote client: %w", err)
-	// }
+	remote, remoteCfg, err := newRemoteClient(local)
+	if err != nil {
+		return nil, fmt.Errorf("remote client: %w", err)
+	}
 	// Return both clients
-	// FIXME Currently both clients are the same (local) for testing
-	// FIXME Change back to remote when real remote cluster is available
 	return &Clients{
 		Local:      local,
 		LocalCfg:   localCfg,
-		Remote:     local,	// FIXME Change back to remote
-		RemoteCfg:  localCfg, // FIXME Change back to remoteCfg
+		Remote:     remote,
+		RemoteCfg:  remoteCfg,
 	}, nil
 
 }
@@ -84,42 +78,41 @@ func InitClients() (*Clients, error) {
 * remote cluster: to patch deployments with updated annotations
 * Returns an error if the ServiceAccount does not exist or if the check fails.
 */
-// TODO: Review if this is working as expected with real remote cluster and deployment in local cluster
 func CheckServiceAccountExists(clients *Clients) (error) {
 	// NOTE: Names of ServiceAccounts are expected to be "policy-agent-sa" but can be configured via ENV
-	// Get names from ENV or use default
 	localServiceAccountName := os.Getenv("LOCAL_SERVICEACCOUNT_NAME")
 	if localServiceAccountName == "" {
 		localServiceAccountName = "policy-agent-sa"
-	}
-	remoteServiceAccountName := os.Getenv("REMOTE_SERVICEACCOUNT_NAME")
-	if remoteServiceAccountName == "" {
-		remoteServiceAccountName = "policy-agent-sa"
 	}
 	localNamespace := os.Getenv("LOCAL_SERVICEACCOUNT_NAMESPACE")
 	if localNamespace == "" {
 		localNamespace = "policy-agent"
 	}
+	remoteServiceAccountName := os.Getenv("REMOTE_SERVICEACCOUNT_NAME")
+	if remoteServiceAccountName == "" {
+		remoteServiceAccountName = "policy-agent-sa"
+	}
 	remoteNamespace := os.Getenv("REMOTE_SERVICEACCOUNT_NAMESPACE")
 	if remoteNamespace == "" {
-		remoteNamespace = "policy-agent"
+		remoteNamespace = "default"
 	}
 
 	saLocal := clients.Local.CoreV1().ServiceAccounts(localNamespace)
 	_, err := saLocal.Get(context.Background(), localServiceAccountName, v1.GetOptions{})
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return fmt.Errorf("service account %s/%s not found", localNamespace, localServiceAccountName)
+			return fmt.Errorf("local service account %s/%s not found", localNamespace, localServiceAccountName)
 		}
-		return fmt.Errorf("failed to get service account %s/%s: %w", localNamespace, localServiceAccountName, err)
+		return fmt.Errorf("failed to get local service account %s/%s: %w", localNamespace, localServiceAccountName, err)
 	}
+
 	saRemote := clients.Remote.CoreV1().ServiceAccounts(remoteNamespace)
 	_, err = saRemote.Get(context.Background(), remoteServiceAccountName, v1.GetOptions{})
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return fmt.Errorf("service account %s/%s not found", remoteNamespace, remoteServiceAccountName)
+			return fmt.Errorf("remote service account %s/%s not found", remoteNamespace, remoteServiceAccountName)
 		}
-		return fmt.Errorf("failed to get service account %s/%s: %w", remoteNamespace, remoteServiceAccountName, err)
+		return fmt.Errorf("failed to get remote service account %s/%s: %w", remoteNamespace, remoteServiceAccountName, err)
 	}
 	return nil
 }
@@ -227,7 +220,7 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	pod := pods.Items[0].Name
 
 	// Get Token command
-	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment
+	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value
 	cmd := []string{
 		"sh", "-c",
 		`curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
@@ -296,7 +289,6 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
  */
 func newLocalClient() (*kubernetes.Clientset, *rest.Config, error) {
 	// inCluster when running inside a cluster
-	// FIXME when deployed as image in cluster this is used REVIEW: is this working as expected?
 	if cfg, err := rest.InClusterConfig(); err == nil {
 		tune(cfg)
 		cs, err := kubernetes.NewForConfig(cfg)
@@ -320,62 +312,52 @@ func newLocalClient() (*kubernetes.Clientset, *rest.Config, error) {
 	return cs, cfg, nil
 }
 
-// FIXME CURRENTLY NOT USED, because no real remote cluster is available for testing
-func newRemoteClient(local *kubernetes.Clientset) (*kubernetes.Clientset, error) {
-	// Try to load from Secret in local cluster
-    if local != nil {
-		// FIXME Check if connections works with real remote cluster
-        host, token, ca, err := loadRemoteCredsFromSecret(local, "policy-agent", "remote-cluster-cred")
-        if err == nil {
-            return newDirectClient(directOpts{
-                Host:        host,
-                BearerToken: token,
-                CAData:      ca,
-                Insecure:    false,
-            })
-        }
-    }
-	// FIXME GET 
-	// --- Direct from ENV variables ---
-    host := strings.TrimSpace(os.Getenv("REMOTE_API_SERVER_URL"))
-    tokPath := os.Getenv("REMOTE_TOKEN_PATH")
-    caPath := os.Getenv("REMOTE_CA_PATH")
-    if host != "" && tokPath != "" && caPath != "" {
-        tokenB, err1 := os.ReadFile(tokPath)
-        caB,    err2 := os.ReadFile(caPath)
-        if err := firstErr(err1, err2); err == nil {
-            return newDirectClient(directOpts{
-                Host:        host,
-                BearerToken: strings.TrimSpace(string(tokenB)),
-                CAData:      caB,
-                Insecure:    false,
-            })
-        }
-    }
+/**
+* Create Kubernetes client for remote cluster
+ */
+func newRemoteClient(_ *kubernetes.Clientset) (*kubernetes.Clientset, *rest.Config, error) {
+	remoteAPIServerURL  := os.Getenv("REMOTE_API_SERVER_URL")
+	remoteTokenFile  := os.Getenv("REMOTE_TOKEN_FILE")
+	remoteCAFile  := os.Getenv("REMOTE_CA_FILE")
 
-    // Fallback: local via kubeconfig + UNTRUSTED/REMOTE Kontext for development
-    kc := kubeconfigPath()
-    over := &clientcmd.ConfigOverrides{}
-    if ctx := os.Getenv("KUBECONTEXT_REMOTE"); ctx != "" {
-        over.CurrentContext = ctx
-    }
-    loading := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kc}
-    cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loading, over).ClientConfig()
-    if err != nil { return nil, err }
-    tune(cfg)
-    return kubernetes.NewForConfig(cfg)
+	if remoteAPIServerURL  == "" || remoteTokenFile  == "" {
+		return nil, nil, fmt.Errorf("REMOTE_API_SERVER_URL or REMOTE_TOKEN_FILE not set")
+	}
+
+	token, err := os.ReadFile(remoteTokenFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read remote token file %s: %w", remoteTokenFile , err)
+	}
+
+	var ca []byte
+	if remoteCAFile  != "" {
+		ca, err = os.ReadFile(remoteCAFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read remote CA file %s: %w", remoteCAFile , err)
+		}
+	}
+
+	client, cfg, err := newDirectClient(directOpts{
+			Host:        remoteAPIServerURL,
+			BearerToken: strings.TrimSpace(string(token)),
+			CAData:      ca,
+			Insecure:    false,
+		})
+	
+	if err == nil {
+		return client, cfg, nil
+	}
+	return nil, nil, fmt.Errorf("failed to create remote client: no valid credentials found")
 }
 
-func newDirectClient(options directOpts) (*kubernetes.Clientset, error) {
+
+func newDirectClient(options directOpts) (*kubernetes.Clientset, *rest.Config, error) {
 	if options.Host == "" || options.BearerToken == "" {
-		return nil, fmt.Errorf("direct client needs Host and BearerToken")
+		return nil, nil, fmt.Errorf("direct client needs Host and BearerToken")
 	}
 	tls := rest.TLSClientConfig{Insecure: options.Insecure}
+	
 	if len(options.CAData) > 0 {
-		// optional: min check to verify CAData is valid
-		if _, err := x509.ParseCertificate(options.CAData); err != nil {
-			return nil, fmt.Errorf("invalid CA data: %w", err)
-		}
 		tls.CAData = options.CAData
 	}
 	cfg := &rest.Config{
@@ -384,7 +366,11 @@ func newDirectClient(options directOpts) (*kubernetes.Clientset, error) {
 		TLSClientConfig: tls,
 	}
 	tune(cfg)
-	return kubernetes.NewForConfig(cfg)
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, cfg, err
 }
 
 /**
@@ -407,38 +393,47 @@ func kubeconfigPath() string {
 	return home + string(os.PathSeparator) + ".kube" + string(os.PathSeparator) + "config"
 }
 
-/**
-* Load remote creds from a Kubernetes Secret in the local cluster
-*/
-func loadRemoteCredsFromSecret(local *kubernetes.Clientset, ns, secretName string) (host string, token string, ca []byte, err error) {
-    sec, err := local.CoreV1().Secrets(ns).Get(context.Background(), secretName, v1.GetOptions{})
-    if err != nil {
-        return "", "", nil, fmt.Errorf("get secret %s/%s: %w", ns, secretName, err)
-    }
-    hostB, ok := sec.Data["api-server-url"]
-    if !ok {
-        return "", "", nil, fmt.Errorf("key api-server-url not found in secret")
-    }
-    tokB, ok := sec.Data["token"]
-    if !ok { return "", "", nil, fmt.Errorf("key token not found in secret") }
-    caB, ok := sec.Data["ca.crt"]
-    if !ok { return "", "", nil, fmt.Errorf("key ca.crt not found in secret") }
+// /**
+// * Load remote creds from a Kubernetes Secret in the local cluster
+// */
+// func loadRemoteCredsFromSecret(local *kubernetes.Clientset) (host string, token string, ca []byte, err error) {
+// 	ns := os.Getenv("REMOTE_CRED_SECRET_NAMESPACE")
+// 	if ns == "" {
+// 		ns = "policy-agent"
+// 	}
+// 	secretName := os.Getenv("REMOTE_CRED_SECRET_NAME")
+// 	if secretName == "" {
+// 		secretName = "remote-cluster-credentials"
+// 	}
 
-    return strings.TrimSpace(string(hostB)), strings.TrimSpace(string(tokB)), caB, nil
-}
+//     sec, err := local.CoreV1().Secrets(ns).Get(context.Background(), secretName, v1.GetOptions{})
+//     if err != nil {
+//         return "", "", nil, fmt.Errorf("get secret %s/%s: %w", ns, secretName, err)
+//     }
+//     hostB, ok := sec.Data["api-server-url"]
+//     if !ok {
+//         return "", "", nil, fmt.Errorf("key api-server-url not found in secret")
+//     }
+//     tokB, ok := sec.Data["token"]
+//     if !ok { return "", "", nil, fmt.Errorf("key token not found in secret") }
+//     caB, ok := sec.Data["ca.crt"]
+//     if !ok { return "", "", nil, fmt.Errorf("key ca.crt not found in secret") }
 
-func firstErr(errs ...error) error {
-	for _, e := range errs {
-		if e != nil && !isNotExist(e) { return e }
-	}
-	return nil
-}
+//     return strings.TrimSpace(string(hostB)), strings.TrimSpace(string(tokB)), caB, nil
+// }
 
-func isNotExist(err error) bool {
-	return err != nil && (os.IsNotExist(err) || errorsIs(err, fs.ErrNotExist))
-}
+// func firstErr(errs ...error) error {
+// 	for _, e := range errs {
+// 		if e != nil && !isNotExist(e) { return e }
+// 	}
+// 	return nil
+// }
 
-func errorsIs(err, target error) bool { return err != nil && target != nil && (err == target) }
+// func isNotExist(err error) bool {
+// 	return err != nil && (os.IsNotExist(err) || errorsIs(err, fs.ErrNotExist))
+// }
+
+// func errorsIs(err, target error) bool { return err != nil && target != nil && (err == target) }
 
 
 
@@ -450,13 +445,35 @@ func errorsIs(err, target error) bool { return err != nil && target != nil && (e
 /**
 * Ping the Kubernetes API server to verify connectivity
  */
-func PingAPI(ctx context.Context, c *kubernetes.Clientset) error {
-	ver, err := c.ServerVersion()
+func PingAPI(ctx context.Context, clients *Clients) error {
+	// Ping local cluster
+	ver, err := clients.Local.ServerVersion()
 	if err != nil { return fmt.Errorf("api not reachable: %w", err) }
 	fmt.Printf("Connected, version: %s\n", ver.GitVersion)
 
-	pods, err := c.CoreV1().Pods("policy-agent").List(ctx, v1.ListOptions{})
-	if err != nil { return fmt.Errorf("list pods policy-agent: %w", err) }
-	fmt.Printf("Found %d pods in policy-agent\n", len(pods.Items))
+	// Ping remote cluster
+	ver, err = clients.Remote.ServerVersion()
+	if err != nil { return fmt.Errorf("remote api not reachable: %w", err) }
+	fmt.Printf("Connected to remote, version: %s\n", ver.GitVersion)
+
+	// ##########################################
+	// DEBUG Ping remote cluster to verify connectivity
+	// ##########################################
+
+	// deployments, err := clients.Local.AppsV1().Deployments("default").List(ctx, v1.ListOptions{})
+	// if err != nil { return fmt.Errorf("list deployments default: %w", err) }
+	// fmt.Printf("Found %d deployments in default\n", len(deployments.Items))
+	
+	// log.Printf("InitClients final: remoteTokenLen=%d remoteHost=%s",
+	// 	len(clients.RemoteCfg.BearerToken),
+	// 	clients.RemoteCfg.Host,
+	// )
+
+	// pods, err := clients.Remote.CoreV1().Pods("default").List(ctx, v1.ListOptions{})
+	// if err != nil { return fmt.Errorf("list pods default: %w", err) }
+	// fmt.Printf("Found %d pods in default\n", len(pods.Items))
+
+	// END DEBUG Ping remote cluster to verify connectivity
+	
 	return nil
 }

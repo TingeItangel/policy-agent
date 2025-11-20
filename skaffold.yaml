@@ -13,13 +13,7 @@ build:
         dockerfile: Dockerfile.dev
       sync:
         manual:
-          - src: "**/*.go"
-            dest: "/app"
-          - src: "go.mod"
-            dest: "/app"
-          - src: "go.sum"
-            dest: "/app"
-          - src: ".air.toml" # <- hinzufügen
+          - src: "."
             dest: "/app"
 
 manifests:
@@ -39,6 +33,7 @@ portForward:
     namespace: policy-agent
     port: 8443
     localPort: 8443
+    address: "0.0.0.0"
   - resourceType: deployment
     resourceName: policy-agent
     namespace: policy-agent

@@ -126,7 +126,6 @@ func GetInitDataFromAnnotation(runtimeObj runtime.Object) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("expected Deployment object, got %T", runtimeObj)
 	}
-	// const initDataAnnotationKey = "io.katacontainers.config.runtime.cc_init_data"
 	var annotations map[string]string
 
 	annotations = deployment.Spec.Template.Annotations
@@ -212,7 +211,6 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
 	})
-	// Warum bekomme ich hier Pod len = 0 obwohl ein pod von einem deployment in dem ns existiert?
 	if err != nil || len(pods.Items) == 0 {
 		return "", fmt.Errorf("failed to list pods for deployment %s: %w", deploymentName, err)
 	}
@@ -246,25 +244,29 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 
 	exec, err := remotecommand.NewSPDYExecutor(clients.RemoteCfg, "POST", req.URL())
 	if err != nil {
-		// BUG UNCOMMENT AGAIN IF REAL REMOTE CLUSTER IS AVAILABLE
-		log.Default().Println("TODO: ENABLE RETURN AGAIN !!!!!! ", err, exec)
-		//return "", fmt.Errorf("exec init: %w", err)
+		return "", fmt.Errorf("exec init: %w", err)
 	}
 
 // DEBUG USE HARDCODED TOKEN RESPONSE FOR TRESTING IF NO REAL REMOTE CLUSTER IS AVAILABLE
-	var hardcodedTokenResponse = `{
-		"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWJtb2RzIjpbeyJjcHUiOnsiaWF0IjoxNjg4NzI4MDAwLCJleHAiOjE3MTkzMjQ0MDAsIm1yX2NvbmZpZ19pZCI6IjEyMzQ1Njc4OTBhYmNkZWYifX1dfQ.dummy-signature"`
-	var stdout, stderr bytes.Buffer
-	stdout.WriteString(hardcodedTokenResponse)
+	// var hardcodedTokenResponse = `{
+	// 	"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWJtb2RzIjpbeyJjcHUiOnsiaWF0IjoxNjg4NzI4MDAwLCJleHAiOjE3MTkzMjQ0MDAsIm1yX2NvbmZpZ19pZCI6IjEyMzQ1Njc4OTBhYmNkZWYifX1dfQ.dummy-signature"`
+	// var stdout, stderr bytes.Buffer
+	// stdout.WriteString(hardcodedTokenResponse)
 // END DEBUG USE HARDCODED TOKEN RESPONSE FOR TRESTING IF NO REAL REMOTE CLUSTER IS AVAILABLE	
 
 	// TODO TEST WITH REAL REMOTE CLUSTER
 	// --- Execute the command ---
-	// var stdout, stderr bytes.Buffer
-	// err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-	// 	Stdout: &stdout,
-	// 	Stderr: &stderr,
-	// })
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	// FIXME: DEBUG PRINT OUTPUT
+	log.Printf("Exec stdout: %s", stdout.String())
+	log.Printf("Exec stderr: %s", stderr.String())
+	// FIXME "pods \"nginx-deployment-674c987cb8-8kgx9\" is forbidden: User \"system:serviceaccount:default:policy-agent-sa\" cannot create resource \"pods/exec\" in API group \"\" in the namespace \"default\""
+	// But i dont want create a resource, only kubectl exec <pod> -- curl ...
 	if err != nil {
 		return "", fmt.Errorf("exec error: %v, stderr=%s", err, stderr.String())
 	}

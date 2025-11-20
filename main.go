@@ -41,15 +41,6 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			return
 		}
 		
-		// DEBUG ---- REMOVE THIS TEST AFTER TESTING ----
-		sessionTest, err := redis.GetSessionData(session.ID)
-		if err != nil {
-			http.Error(w, "Failed to retrieve session data after saving: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Retrieved session after saving: ID=%s, Nonce=%s, SecretKey=%x", sessionTest.ID, sessionTest.Nonce, sessionTest.SecretKey)
-		// DEBUG ---- REMOVE THIS TEST AFTER TESTING ----
-
 		// --- Store session.secretKey in Trustee ---
 		err = k8s.StoreSessionInTrustee(clients, r.Context(), session)
 		if err != nil {
@@ -60,6 +51,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		log.Printf("Session stored in trustee: ID=%s, Nonce=%s, SecretKey=%x", session.ID, session.Nonce, session.SecretKey)
 		// --- Return session id and nonce to client ---
 		w.Header().Set("Content-Type", "application/json")
+		// FIXME --- REMOVE SECRET KEY IN RESPONSE AFTER TESTING ---
 		json.NewEncoder(w).Encode(map[string]string{"session_id": session.ID, "nonce": session.Nonce, "secret_key": hex.EncodeToString(session.SecretKey)})
 
 

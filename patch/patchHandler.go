@@ -95,6 +95,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	}
 
 	// --- Get new config_mr value from the remote cluster ---
+	// TODO: FIXME  MAKE A WAIT FUNCTION THAT CHECKS IF THE PODS ARE RESTARTED AND ONLY THEN GETS THE NEW VALUE
 	newMrConfigId, err := k8s.GetNewMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
 	// TODO: Check if newMrConfigId has valid format. Keine Sonderzeichen etc. Es darf nicht {\n\t\t etc. enthalten.}
 	if err != nil {

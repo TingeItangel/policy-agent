@@ -572,19 +572,61 @@ kubectl config view --raw -o jsonpath="{.clusters[?(@.name==\"$CLUSTER_NAME\")].
 
 ### 5. Remote-Cluster-Deployments anpassen, welche vom Policy-Agent verändert werden sollen
 
-- Es muss folgender command erlaubt sein:
+- Es muss folgender command in der initdata erlaubt sein:
 
 ```bash
-curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
-		 | jq -r '.token' \
-		 | cut -d '.' -f2 \
-		 | base64 -d \
-		 | jq -r '.submods.cpu."ear.veraison.annotated-evidence".tdx.quote.body.mr_config_id'`
+curl -s http://127.0.0.1:8006/aa/token?token_type=kbs
 ```
 
 - Es müssen API-Calls vom Pod zur Guest-CVM erlaubt sein, um den Token zu bekommen: `io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"`
 
-  Ansonsten ist der API-Call vom Pod zur Guest-CVM nicht möglich.
+Ansonsten ist der API-Call vom Pod zur Guest-CVM nicht möglich.
+
+Die initdata Datei muss entsprechend angepasst werden:
+Es wird diese Struktur benötigt:
+
+```toml
+version = "0.1.0"
+algorithm = "sha256"
+[data]
+"policy.rego" = '''
+package agent_policy
+
+...
+
+default CreateContainerRequest := false
+default ExecProcessRequest := false
+
+CreateContainerRequest if {
+	every storage in input.storages {
+        some allowed_image in policy_data.allowed_images
+        storage.source == allowed_image
+    }
+}
+
+ExecProcessRequest if {
+    input_command = concat(" ", input.process.Args)
+	some allowed_command in policy_data.allowed_commands
+	input_command == allowed_command
+}
+
+policy_data := {
+	"allowed_commands": [
+		"curl -s http://127.0.0.1:8006/aa/token?token_type=kbs",
+	],
+	"allowed_images": [
+		"pause",
+        "nginx:latest"
+	]
+}
+'''
+
+...
+
+```
+
+Der Policy-Agent kann nur Deployments patchen, wenn die initdata Datei eine solche policy_data Struktur enthält.
+Es wird auf das vorhandensein dieser Struktur geprüft und entsprechend an dieser Stelle neue commands hinzugefügt/entfernt oder das image angepasst.
 
 ## Local Cluster
 
@@ -613,7 +655,7 @@ curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
 
 ```bash
 kubectl -n policy-agent create secret generic remote-cluster-cred \
-  --from-literal=api-server-url="https://<remote-apiserver>" \
+  --from-file=api-server-url=/tmp/remote.api.server.url \
   --from-file=token=/tmp/policy-agent-sa.token \
   --from-file=ca.crt=/tmp/remote.ca.crt
 ```

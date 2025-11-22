@@ -1,6 +1,7 @@
 package patch
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -90,14 +92,21 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	// --- Apply patch in remote cluster ---
 	err = k8s.UpdateAnnotationValue(clients.Remote, deployment, newB64InitData, req.Body.Namespace)
 	if err != nil {
-		http.Error(w, "Failed to apply patch to k8s cluster", http.StatusBadRequest)
+		http.Error(w, "Failed to apply patch to remote cluster", http.StatusBadRequest)
 		return
 	}
 
+	// TODO: Use Queue for rollout wait and handle other requests meanwhile
+
+	// --- Wait for Deployment rollout ---
+	err = k8s.WaitForDeploymentRollout(context.Background(), clients.Remote, req.Body.Namespace, req.Body.DeploymentName, 2*time.Minute)
+	if err != nil {
+		http.Error(w, "Timed out waiting for deployment rollout", http.StatusBadRequest)
+		return
+	}
+	
 	// --- Get new config_mr value from the remote cluster ---
-	// TODO: FIXME  MAKE A WAIT FUNCTION THAT CHECKS IF THE PODS ARE RESTARTED AND ONLY THEN GETS THE NEW VALUE
 	newMrConfigId, err := k8s.GetNewMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
-	// TODO: Check if newMrConfigId has valid format. Keine Sonderzeichen etc. Es darf nicht {\n\t\t etc. enthalten.}
 	if err != nil {
 		http.Error(w, "Failed to get new config_mr from remote cluster", http.StatusBadRequest)
 		return

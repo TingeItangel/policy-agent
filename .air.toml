@@ -1,5 +1,5 @@
 [build]
-cmd = "mkdir -p ./bin && CGO_ENABLED=0 GOFLAGS='-buildvcs=false' /usr/local/go/bin/go build -p=1 -gcflags 'all=-N -l -trimpath' -o ./bin/policy-agent ."
+cmd = "mkdir -p ./bin && CGO_ENABLED=0 GOFLAGS='-buildvcs=false' /usr/local/go/bin/go build -p=1 -gcflags 'all=-N -l' -o ./bin/policy-agent ."
 bin = ""
 full_bin = "sh -lc \"/usr/local/bin/dlv exec ./bin/policy-agent --headless --listen=:40000 --api-version=2 --accept-multiclient --continue\""
 exclude_dir = ["deployments","vendor",".git","tmp","bin","assets"]

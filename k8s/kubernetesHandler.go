@@ -3,6 +3,8 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -192,6 +195,69 @@ func GetDeploymentFromCluster(client *kubernetes.Clientset,req types.PolicyReque
 	return deployment, nil
 }
 
+
+
+/**
+* WaitForDeploymentRollout waits until the deployment has fully rolled out or the timeout is reached.
+*/
+func WaitForDeploymentRollout(
+    ctx context.Context,
+    client kubernetes.Interface,
+    namespace, deploymentName string,
+    timeout time.Duration,
+) error {
+    ctx, cancel := context.WithTimeout(ctx, timeout)
+    defer cancel()
+
+    ticker := time.NewTicker(2 * time.Second)
+    defer ticker.Stop()
+
+    // remember target generation
+    dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+    if err != nil {
+        return fmt.Errorf("get deployment: %w", err)
+    }
+    targetGeneration := dep.Generation
+    var desired int32 = 1
+    if dep.Spec.Replicas != nil {
+        desired = *dep.Spec.Replicas
+    }
+
+    for {
+        select {
+        case <-ctx.Done():
+            return fmt.Errorf("timeout waiting for deployment %s/%s rollout: %w", namespace, deploymentName, ctx.Err())
+        case <-ticker.C:
+            dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+            if err != nil {
+                return fmt.Errorf("get deployment: %w", err)
+            }
+
+			// check if observed generation matches target generation
+            if dep.Status.ObservedGeneration < targetGeneration {
+                continue
+            }
+
+            if dep.Status.UpdatedReplicas < desired {
+                continue
+            }
+            if dep.Status.ReadyReplicas < desired {
+                continue
+            }
+            if dep.Status.AvailableReplicas < desired {
+                continue
+            }
+            if dep.Status.UnavailableReplicas > 0 {
+                continue
+            }
+
+            return nil
+        }
+    }
+}
+
+
+
 /**
 * Get new config_mr value from the remote cluster for the given deployment and namespace
 * The deployment must be running in the remote cluster and have the following command as allowed command in the kata-policy:
@@ -220,12 +286,7 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	// Get Token command
 	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value
 	cmd := []string{
-		"sh", "-c",
-		`curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
-		 | jq -r '.token' \
-		 | cut -d '.' -f2 \
-		 | base64 -d \
-		 | jq -r '.submods.cpu."ear.veraison.annotated-evidence".tdx.quote.body.mr_config_id'`,
+		"curl", "-s", "http://127.0.0.1:8006/aa/token?token_type=kbs",
 	}
 
 	// Exec into pod
@@ -247,14 +308,6 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 		return "", fmt.Errorf("exec init: %w", err)
 	}
 
-// DEBUG USE HARDCODED TOKEN RESPONSE FOR TRESTING IF NO REAL REMOTE CLUSTER IS AVAILABLE
-	// var hardcodedTokenResponse = `{
-	// 	"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWJtb2RzIjpbeyJjcHUiOnsiaWF0IjoxNjg4NzI4MDAwLCJleHAiOjE3MTkzMjQ0MDAsIm1yX2NvbmZpZ19pZCI6IjEyMzQ1Njc4OTBhYmNkZWYifX1dfQ.dummy-signature"`
-	// var stdout, stderr bytes.Buffer
-	// stdout.WriteString(hardcodedTokenResponse)
-// END DEBUG USE HARDCODED TOKEN RESPONSE FOR TRESTING IF NO REAL REMOTE CLUSTER IS AVAILABLE	
-
-	// TODO TEST WITH REAL REMOTE CLUSTER
 	// --- Execute the command ---
 	var stdout, stderr bytes.Buffer
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
@@ -263,15 +316,65 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	})
 
 	// FIXME: DEBUG PRINT OUTPUT
+	
 	log.Printf("Exec stdout: %s", stdout.String())
 	log.Printf("Exec stderr: %s", stderr.String())
-	// FIXME "pods \"nginx-deployment-674c987cb8-8kgx9\" is forbidden: User \"system:serviceaccount:default:policy-agent-sa\" cannot create resource \"pods/exec\" in API group \"\" in the namespace \"default\""
-	// But i dont want create a resource, only kubectl exec <pod> -- curl ...
+
 	if err != nil {
 		return "", fmt.Errorf("exec error: %v, stderr=%s", err, stderr.String())
 	}
 
-	mr := strings.TrimSpace(stdout.String())
+
+	raw := strings.TrimSpace(stdout.String())
+	var resp struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return "", fmt.Errorf("failed to parse KBS response JSON: %w", err)
+	}
+	if resp.Token == "" {
+		return "", fmt.Errorf("no token field in KBS response")
+	}
+	// Decode JWT token to get mr_config_id
+	parts := strings.Split(resp.Token, ".")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid JWT format")
+	}
+	payloadB64 := parts[1]
+
+	// NOTE: JWT base64url encoding may omit padding, but Go's base64 decoder requires it
+	if l := len(payloadB64) % 4; l != 0 {
+		payloadB64 += strings.Repeat("=", 4-l)
+	}
+	payloadJSON, err := base64.URLEncoding.DecodeString(payloadB64)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to decode JWT payload: %w", err)
+	}
+
+	var payload struct {
+		Submods struct {
+			CPU struct {
+				EarVeraisonAnnotatedEvidence struct {
+					TDX struct {
+						Quote struct {
+							Body struct {
+								MrConfigID string `json:"mr_config_id"`
+							} `json:"body"`
+						} `json:"quote"`
+					} `json:"tdx"`
+				} `json:"ear.veraison.annotated-evidence"`
+			} `json:"cpu"`
+		} `json:"submods"`
+	}
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return "", fmt.Errorf("failed to parse JWT payload JSON: %w", err)
+	}
+
+	mr := strings.TrimSpace(payload.Submods.CPU.
+	EarVeraisonAnnotatedEvidence.TDX.
+	Quote.Body.MrConfigID)
+		
 	if mr == "" {
 		return "", fmt.Errorf("mr_config_id empty")
 	}
@@ -395,50 +498,30 @@ func kubeconfigPath() string {
 	return home + string(os.PathSeparator) + ".kube" + string(os.PathSeparator) + "config"
 }
 
-// /**
-// * Load remote creds from a Kubernetes Secret in the local cluster
-// */
-// func loadRemoteCredsFromSecret(local *kubernetes.Clientset) (host string, token string, ca []byte, err error) {
-// 	ns := os.Getenv("REMOTE_CRED_SECRET_NAMESPACE")
-// 	if ns == "" {
-// 		ns = "policy-agent"
-// 	}
-// 	secretName := os.Getenv("REMOTE_CRED_SECRET_NAME")
-// 	if secretName == "" {
-// 		secretName = "remote-cluster-credentials"
-// 	}
 
-//     sec, err := local.CoreV1().Secrets(ns).Get(context.Background(), secretName, v1.GetOptions{})
-//     if err != nil {
-//         return "", "", nil, fmt.Errorf("get secret %s/%s: %w", ns, secretName, err)
-//     }
-//     hostB, ok := sec.Data["api-server-url"]
-//     if !ok {
-//         return "", "", nil, fmt.Errorf("key api-server-url not found in secret")
-//     }
-//     tokB, ok := sec.Data["token"]
-//     if !ok { return "", "", nil, fmt.Errorf("key token not found in secret") }
-//     caB, ok := sec.Data["ca.crt"]
-//     if !ok { return "", "", nil, fmt.Errorf("key ca.crt not found in secret") }
+/**
+* Check if a Deployment has fully rolled out
+ */
+func isDeploymentRolledOut(dep *appsv1.Deployment) bool {
+    // No replicas defined means there is nothing to roll out
+    if dep.Spec.Replicas == nil {
+        return true
+    }
 
-//     return strings.TrimSpace(string(hostB)), strings.TrimSpace(string(tokB)), caB, nil
-// }
+    desired := *dep.Spec.Replicas
 
-// func firstErr(errs ...error) error {
-// 	for _, e := range errs {
-// 		if e != nil && !isNotExist(e) { return e }
-// 	}
-// 	return nil
-// }
+    if dep.Status.UpdatedReplicas < desired {
+        return false
+    }
+    if dep.Status.ReadyReplicas < desired {
+        return false
+    }
+    if dep.Status.AvailableReplicas < desired {
+        return false
+    }
 
-// func isNotExist(err error) bool {
-// 	return err != nil && (os.IsNotExist(err) || errorsIs(err, fs.ErrNotExist))
-// }
-
-// func errorsIs(err, target error) bool { return err != nil && target != nil && (err == target) }
-
-
-
+    return true
+}
 
 
 // ---------- Test Functions ----------

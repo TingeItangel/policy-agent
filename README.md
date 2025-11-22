@@ -654,10 +654,7 @@ Es wird auf das vorhandensein dieser Struktur geprüft und entsprechend an diese
 - policy-agent-sa-token und remote.ca.crt müssen im lokalen Cluster als secret angelegt werden:
 
 ```bash
-kubectl -n policy-agent create secret generic remote-cluster-cred \
-  --from-file=api-server-url=/tmp/remote.api.server.url \
-  --from-file=token=/tmp/policy-agent-sa.token \
-  --from-file=ca.crt=/tmp/remote.ca.crt
+kubectl -n policy-agent create secret generic remote-cluster-cred --from-file=api-server-url=/tmp/remote.api.server.url --from-file=token=/tmp/policy-agent-sa.token --from-file=ca.crt=/tmp/remote.ca.crt
 ```
 
 # Limitationen oder offene Fragen

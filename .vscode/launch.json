@@ -19,31 +19,7 @@
       "remotePath": "/app",
       "substitutePath": [
         { "from": "/app", "to": "C:\\Users\\claud\\Documents\\policy-agent" },
-        { "from": "C:\\Users\\claud\\Documents\\policy-agent", "to": "/app" },
-        {
-          "from": "/app/k8s",
-          "to": "C:\\Users\\claud\\Documents\\policy-agent\\k8s"
-        },
-        {
-          "from": "C:\\Users\\claud\\Documents\\policy-agent\\k8s",
-          "to": "/app/k8s"
-        },
-        {
-          "from": "/app/patch",
-          "to": "C:\\Users\\claud\\Documents\\policy-agent\\patch"
-        },
-        {
-          "from": "C:\\Users\\claud\\Documents\\policy-agent\\patch",
-          "to": "/app/patch"
-        },
-        {
-          "from": "/app/redis",
-          "to": "C:\\Users\\claud\\Documents\\policy-agent\\redis"
-        },
-        {
-          "from": "C:\\Users\\claud\\Documents\\policy-agent\\redis",
-          "to": "/app/redis"
-        }
+        { "from": "C:\\Users\\claud\\Documents\\policy-agent", "to": "/app" }
       ],
       "showLog": true,
       "trace": "verbose"

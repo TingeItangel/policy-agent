@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	redis "policy-agent/database"
 	"policy-agent/k8s"
 	"policy-agent/patch"
@@ -182,11 +183,19 @@ func main() {
 		MinVersion:   tls.VersionTLS12,
 	}
 
-	cert, err := tls.LoadX509KeyPair("assets/server.crt", "assets/server.key") // server's own public cert + private key
+	// Load server certificate and key
+	certPath := os.Getenv("POLICY_AGENT_TLS_CERT")
+	keyPath := os.Getenv("POLICY_AGENT_TLS_KEY")
+
+	if certPath == "" || keyPath == "" {
+		log.Fatal("Cannot start server: POLICY_AGENT_TLS_CERT or POLICY_AGENT_TLS_KEY environment variable not set. Check if the TLS secret is created and mounted correctly.")
+	}
+
+	certificate, err := tls.LoadX509KeyPair(certPath, keyPath) // server's own public cert + private key
 	if err != nil {
 		log.Fatal("failed to load server cert/key:", err)
 	}
-	tlsConfig.Certificates = []tls.Certificate{cert} // configure server to use this cert/key pair
+	tlsConfig.Certificates = []tls.Certificate{certificate} // configure server to use this cert/key pair
 
 	server := &http.Server{
 		Addr:      ":8443",

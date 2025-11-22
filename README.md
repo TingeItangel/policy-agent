@@ -630,32 +630,56 @@ Es wird auf das vorhandensein dieser Struktur geprüft und entsprechend an diese
 
 ## Local Cluster
 
-### 1. Redis im local Cluster starten (z. B. im namespace policy-agent)
+### 1. Redis im local Cluster starten (namespace: `policy-agent`)
 
 - `kubectl apply -f ./deployments/redis.yaml`
 
-### 2. rbac für den policy-agent anlegen
+### 2. Policy-Agent-RBAC anlegen
 
 - `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
 
-### 3. policy-agent Deployment erstellen
+### 3. Secrets im lokalen Cluster für Policy-Agent anlegen
 
-- `kubectl apply -f ./deployments/deployment-policy-agent.yaml`
-- **WICHTIG**: im Deployment yaml müssen die ENV Variablen für den remote cluster gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
-  - `REDIS_ADDR`: redis:6379 (wenn im gleichen namespace deployed)
-  - `KBS_NAMESPACE`: namespace in dem trustee auf dem lokalen cluster läuft (z. B. confidential-containers-system oder operators)
-  - `REMOTE_API_SERVER_URL`: URL des API-Servers des remote clusters (z. B. https://<remote-cluster-ip>:6443)
-- policy-agent service wird automatisch mit dem Deployment erstellt.
-  - Je nach Netzwerksetup muss der service typ angepasst werden (ClusterIP, NodePort, LoadBalancer) und extern erreichbar gemacht werden.
-  - Hier: LoadBalancer mit metallb auf dem lokalen cluster.
+#### 3.1 Remote Cluster Credentials
 
-### 5. Secrets im lokalen Cluster anlegen (remote-cluster-cred im Namespace `policy-agent`)
-
-- policy-agent-sa-token und remote.ca.crt müssen im lokalen Cluster als secret angelegt werden:
+- API-Server-URL, token und CA des remote clusters müssen als Dateien vorliegen (siehe oben).
 
 ```bash
+# Secret im lokalen Cluster anlegen:
 kubectl -n policy-agent create secret generic remote-cluster-cred --from-file=api-server-url=/tmp/remote.api.server.url --from-file=token=/tmp/policy-agent-sa.token --from-file=ca.crt=/tmp/remote.ca.crt
 ```
+
+#### 3.2 Server Zertifikate
+
+- Server Zertifikat und Key für TLS im lokalen Cluster als secret anlegen
+
+```bash
+# Namespace muss existieren:
+kubectl create namespace policy-agent
+
+# Certificate und Key erstellen (Self-Signed für Testzwecke):
+openssl req -x509 -newkey rsa:4096 \
+  -keyout /tmp/server.key \
+  -out /tmp/server.crt \
+  -days 365 -nodes \
+  -subj "//CN=policy-agent"
+
+# Server Zertifikat und Key als Secret im lokalen Cluster anlegen:
+kubectl -n policy-agent create secret tls policy-agent-tls --cert=/tmp/server.crt --key=/tmp/server.key
+```
+
+### 4. Policy-Agent-Deployment erstellen
+
+- `kubectl apply -f ./deployments/policy-agent-deployment.yaml`
+- **WICHTIG**: im Deployment-File müssen die `ENV` Variablen gesetzte werden:
+
+  - `KBS_NAMESPACE`: namespace in dem trustee auf dem lokalen cluster läuft (z. B. confidential-containers-system oder operators)
+  - `KBS_CONFIG_NAME`: name der kbs config im lokalen cluster (z. B. kbs-config)
+  - Remote-Cluster-URL gesetzt werden (API-Server-URL, token, namespace, serviceaccount name)
+  - `REDIS_ADDR`: redis:6379 (wenn im gleichen namespace deployed)
+
+- Policy-Agent-Service wird automatisch mit dem Deployment erstellt.
+  - Je nach Netzwerksetup muss der Service-Typ angepasst werden (NodePort oder LoadBalancer), um extern erreichbar zu sein.
 
 # Limitationen oder offene Fragen
 
@@ -698,4 +722,10 @@ expectedSignature = Base64Encode( HMAC-SHA256(message, secretKey) )
 
 # Ideen:
 
-- [ ] Server Zertifikat von außen beziehen? Als Secret in dem pod mounten?
+- [x] Server Zertifikat von außen beziehen? Als Secret in dem pod mounten?
+
+# Bugs
+
+- [ ] Request mit oldMr = NewMr
+  - Erwartung: Der Wert wird in der kbs-config gelöscht und neu hinzugefügt. Ergebnis der gleiche Wert bleibt bestehen.
+  - Tatsache: Der Wert wird gelöscht, aber nicht neu hinzugefügt. (Running Condition?)

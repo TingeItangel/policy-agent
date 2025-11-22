@@ -64,7 +64,7 @@ func InitClients() (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("remote client: %w", err)
 	}
-	// Return both clients
+
 	return &Clients{
 		Local:      local,
 		LocalCfg:   localCfg,
@@ -195,18 +195,15 @@ func GetDeploymentFromCluster(client *kubernetes.Clientset,req types.PolicyReque
 	return deployment, nil
 }
 
-
-
 /**
 * WaitForDeploymentRollout waits until the deployment has fully rolled out or the timeout is reached.
 */
 func WaitForDeploymentRollout(
-    ctx context.Context,
     client kubernetes.Interface,
     namespace, deploymentName string,
     timeout time.Duration,
 ) error {
-    ctx, cancel := context.WithTimeout(ctx, timeout)
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
     defer cancel()
 
     ticker := time.NewTicker(2 * time.Second)
@@ -261,17 +258,21 @@ func WaitForDeploymentRollout(
 /**
 * Get new config_mr value from the remote cluster for the given deployment and namespace
 * The deployment must be running in the remote cluster and have the following command as allowed command in the kata-policy:
-* kubectl exec -n <namespace> <pod> -- \
-  sh -c "curl -s http://127.0.0.1:8006/aa/token?token_type=kbs \
-    | jq -r '.token' \
-    | cut -d '.' -f2 \
-    | base64 -d \
-    | jq -r '.submods.cpu.\"ear.veraison.annotated-evidence\".tdx.quote.body.mr_config_id'"
+* kubectl exec -n <namespace> <pod> -- curl -s http://127.0.0.1:8006/aa/token?token_type=kbs"
+* 
 * This command retrieves the current mr_config_id from the KBS token inside the CoCo pod.
 *
 * Returns the mr_config_id as string or an error if the retrieval fails.
  */
 func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (string, error) {
+	// DEBUG ----------------- DEBUG -----------------
+	// FIXME: DEBUG SKIP MR CONFIG ID FETCH. REMOVE IN PRODUCTION
+	if (os.Getenv("DEBUG_SKIP_MR_CONFIG_ID_FETCH") == "1") {
+		log.Printf("DEBUG_SKIP_MR_CONFIG_ID_FETCH is set, returning dummy mr_config_id")
+		return "DUMMY_MR_CONFIG_ID_FOR_DEBUGGING_PURPOSES_ONLY", nil
+	}
+	// DEBUG ----------------- DEBUG -----------------
+	
 	ctx := context.Background()
 
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{

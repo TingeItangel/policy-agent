@@ -242,40 +242,42 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 
 /** 
 * UpdateReferenceValues updates the "mr_config_id" entry inside the
-* rvps-reference-values ConfigMap by removing the given oldConfigMr
+* rvps-reference-values ConfigMap by removing the given oldMrConfigId
 * and adding a new config_mr value.
 *
 * It expects the ConfigMap data["reference-values.json"] to be a JSON
 * array of ReferenceValue objects (matching the Trustee format).
 */
-func UpdateReferenceValues(clients *Clients, newMrConfigId, oldConfigMr string) error {
+func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string) error {
 	ctx := context.Background()
-
-	if oldConfigMr == "" {
-		return fmt.Errorf("oldConfigMr is empty")
+	if newMrConfigId == "" {
+		return fmt.Errorf("newMrConfigId is empty")
+	}
+	if oldMrConfigId == "" {
+		return fmt.Errorf("oldMrConfigId is empty")
 	}
 
 	rvpsNamespace := os.Getenv("KBS_NAMESPACE")
 	if rvpsNamespace == "" {
-		rvpsNamespace = "operators"	// default namespace;
+		rvpsNamespace = "operators"
 	}
-	cmName := os.Getenv("RVPS_CONFIGMAP_NAME")
-	if cmName == "" {
-		cmName = "rvps-reference-values"
+	configMapName := os.Getenv("RVPS_CONFIGMAP_NAME")
+	if configMapName == "" {
+		configMapName = "rvps-reference-values"
 	}
 
-	cmClient := clients.Local.CoreV1().ConfigMaps(rvpsNamespace)
+	configMapClient := clients.Local.CoreV1().ConfigMaps(rvpsNamespace)
 
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Load current ConfigMap
-		cm, err := cmClient.Get(ctx, cmName, metav1.GetOptions{})
+		configMap, err := configMapClient.Get(ctx, configMapName, metav1.GetOptions{})
 		if err != nil {
-			return fmt.Errorf("get ConfigMap %s/%s: %w", rvpsNamespace, cmName, err)
+			return fmt.Errorf("get ConfigMap %s/%s: %w", rvpsNamespace, configMapName, err)
 		}
 
-		raw, ok := cm.Data["reference-values.json"]
+		raw, ok := configMap.Data["reference-values.json"]
 		if !ok {
-			return fmt.Errorf("key reference-values.json not found in ConfigMap %s/%s", rvpsNamespace, cmName)
+			return fmt.Errorf("key reference-values.json not found in ConfigMap %s/%s", rvpsNamespace, configMapName)
 		}
 
 		var list []ReferenceValue
@@ -283,33 +285,32 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldConfigMr string) 
 			return fmt.Errorf("unmarshal reference-values.json: %w", err)
 		}
 
-		// Walk all entries and update the one with name == "mr_config_id"
-		foundMrConfig := false
+		foundMrConfigIdObj := false
 		foundOld := false
 
 		for i := range list {
 			if list[i].Name != "mr_config_id" {
 				continue
 			}
-			foundMrConfig = true
+			foundMrConfigIdObj = true
 
 			// check if newMrConfigId is already present
 			hasNew := false
 			newSlice := make([]RVHashValue, 0, len(list[i].HashValues))
 
 			for _, hv := range list[i].HashValues {
-				if hv.Value == newMrConfigId {
-					hasNew = true
-				}
-				// Drop entries with oldConfigMr; keep everything else
-				if hv.Value == oldConfigMr {
+				// Drop entries with oldMrConfigId; keep everything else
+				if hv.Value == oldMrConfigId {
 					foundOld = true
 					continue
+				}
+				if hv.Value == newMrConfigId {
+					hasNew = true
 				}
 				newSlice = append(newSlice, hv)
 			}
 
-			// Add the new config_mr value if it is not present yet
+			// Add the new mr_config_id value if it is not present yet
 			if !hasNew {
 				newSlice = append(newSlice, RVHashValue{
 					Alg:   "sha256",
@@ -320,12 +321,14 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldConfigMr string) 
 			list[i].HashValues = newSlice
 		}
 
-		if !foundMrConfig {
+		if !foundMrConfigIdObj {
 			return fmt.Errorf("no mr_config_id entry found in reference-values")
 		}
+
 		if !foundOld {
-			// Explicitly signal that the given oldConfigMr does not exist
-			return fmt.Errorf("old config_mr not found in mr_config_id hash-value")
+			// Explicitly signal that the given oldMrConfigId does not exist
+			log.Printf("⚠️  warning: oldMrConfigId %q not found in ConfigMap %s/%s", oldMrConfigId, rvpsNamespace, configMapName)
+			// NOTE: old value might not be present, so we do not error out here.
 		}
 
 		// Marshal back to JSON and update the ConfigMap
@@ -333,17 +336,16 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldConfigMr string) 
 		if err != nil {
 			return fmt.Errorf("marshal updated reference-values: %w", err)
 		}
-		if cm.Data == nil {
-			cm.Data = map[string]string{}
+		if configMap.Data == nil {
+			configMap.Data = map[string]string{}
 		}
-		cm.Data["reference-values.json"] = string(newJSON)
+		configMap.Data["reference-values.json"] = string(newJSON)
 
-		if _, err := cmClient.Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("update ConfigMap %s/%s: %w", rvpsNamespace, cmName, err)
+		if _, err := configMapClient.Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("update ConfigMap %s/%s: %w", rvpsNamespace, configMapName, err)
 		}
 
-		log.Printf("✅ updated mr_config_id reference value in %s/%s (old=%s, new=%s)",
-			rvpsNamespace, cmName, oldConfigMr, newMrConfigId)
+		log.Printf("✅ updated mr_config_id in ConfigMap %s/%s", rvpsNamespace, configMapName)
 		return nil
 	})
 	if err != nil {

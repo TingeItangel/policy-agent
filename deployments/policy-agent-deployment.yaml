@@ -1,49 +1,11 @@
-# Redis Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  labels:
-    app: redis
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-        - name: redis
-          image: redis:7.2-alpine
-          ports:
-            - containerPort: 6379
-          args: ["--appendonly", "yes"]
----
-# Redis Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  labels:
-    app: redis
-spec:
-  selector:
-    app: redis
-  ports:
-    - port: 6379
-      targetPort: 6379
----
 # Policy Agent Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: policy-agent
-  labels:
-    app: policy-agent
+  namespace: policy-agent
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: policy-agent
@@ -52,26 +14,85 @@ spec:
       labels:
         app: policy-agent
     spec:
+      serviceAccountName: policy-agent-sa
       containers:
-        - name: policy-agent
-          image: myregistry/policy-agent:latest
+        - name: agent
+          image: policy-agent:test-local
+          imagePullPolicy: Never
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+            - name: DEBUG_SKIP_MR_CONFIG_ID_FETCH
+              value: "1" # Set to "1" to skip fetching mr_config_id for debugging
+
+            - name: REDIS_ADDR
+              value: "redis:6379"
+
+            - name: KBS_NAMESPACE
+              value: "operators"
+
+            - name: KBS_CONFIG_NAME
+              value: "kbsconfig-sample"
+
+            - name: REMOTE_API_SERVER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: remote-cluster-cred
+                  key: api-server-url
+
+            - name: REMOTE_TOKEN_FILE
+              value: "/var/run/remote-cluster/token"
+
+            - name: REMOTE_CA_FILE
+              value: "/var/run/remote-cluster/ca.crt"
+
+            - name: POLICY_AGENT_TLS_CERT
+              value: "/var/run/tls/tls.crt"
+
+            - name: POLICY_AGENT_TLS_KEY
+              value: "/var/run/tls/tls.key"
+
           ports:
             - containerPort: 8443
-          env:
-            - name: REDIS_HOST
-              value: "redis:6379" # connects to Redis service
+
+          volumeMounts:
+            - name: remote-cluster-cred
+              mountPath: /var/run/remote-cluster
+              readOnly: true
+            - name: policy-agent-tls
+              mountPath: /var/run/tls
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "2Gi"
+
+      volumes:
+        - name: remote-cluster-cred
+          secret:
+            secretName: remote-cluster-cred
+        - name: policy-agent-tls
+          secret:
+            secretName: policy-agent-tls
 ---
-# Policy Agent Service
+# Service for Policy Agent Deployment,
 apiVersion: v1
 kind: Service
 metadata:
   name: policy-agent
-  labels:
-    app: policy-agent
+  namespace: policy-agent
 spec:
   selector:
     app: policy-agent
   ports:
     - name: https
-      port: 8443
-      targetPort: 8443
+      port: 8443 # Service-Port
+      targetPort: 8443 # ContainerPort (Webserver in Policy-Agent-Pod)
+      protocol: TCP

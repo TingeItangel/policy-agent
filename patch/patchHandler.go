@@ -1,7 +1,6 @@
 package patch
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -99,7 +98,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	// TODO: Use Queue for rollout wait and handle other requests meanwhile
 
 	// --- Wait for Deployment rollout ---
-	err = k8s.WaitForDeploymentRollout(context.Background(), clients.Remote, req.Body.Namespace, req.Body.DeploymentName, 2*time.Minute)
+	err = k8s.WaitForDeploymentRollout(clients.Remote, req.Body.Namespace, req.Body.DeploymentName, 2*time.Minute)
 	if err != nil {
 		http.Error(w, "Timed out waiting for deployment rollout", http.StatusBadRequest)
 		return

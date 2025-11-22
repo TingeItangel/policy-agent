@@ -24,6 +24,9 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
 
+            - name: DEBUG_SKIP_MR_CONFIG_ID_FETCH
+              value: "1" # Set to "1" to skip fetching mr_config_id for debugging
+
             - name: REDIS_ADDR
               value: "redis:6379"
 

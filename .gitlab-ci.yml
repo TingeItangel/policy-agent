@@ -9,25 +9,27 @@ build-and-push:
   tags:
     - kaniko
   variables:
-    # Name des DockerHub-Images:
     DOCKER_IMAGE: "cmvek/policy-agent"
   script:
+    # Docker-Config für Kaniko bauen – mit username/password statt base64-auth
     - mkdir -p /kaniko/.docker
     - |
       cat > /kaniko/.docker/config.json <<EOF
       {
         "auths": {
           "https://index.docker.io/v1/": {
-          "username": "$DOCKERHUB_USERNAME",
+            "username": "$DOCKERHUB_USERNAME",
             "password": "$DOCKERHUB_TOKEN"
           }
         }
       }
       EOF
 
-      # Zur Kontrolle (Passwort maskieren)
-      - cat /kaniko/.docker/config.json | sed 's/"password": *"[^"]*"/"password": "***"/'
+    # Zur Kontrolle (Passwort maskieren)
+    - >
+      sed 's/"password": *"[^"]*"/"password": "***"/' /kaniko/.docker/config.json
 
+    # Image bauen und pushen
     - >
       /kaniko/executor
       --context "$CI_PROJECT_DIR"

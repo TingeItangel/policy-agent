@@ -48,12 +48,11 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "Failed to store session data in trustee: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// FIXME RETURNING SECRET KEY IN RESPONSE FOR TESTING PURPOSES ONLY
-		log.Printf("Session stored in trustee: ID=%s, Nonce=%s, SecretKey=%x", session.ID, session.Nonce, session.SecretKey)
+		log.Printf("Session stored in trustee: ID=%s, Nonce=%s", session.ID, session.Nonce)
+		
 		// --- Return session id and nonce to client ---
 		w.Header().Set("Content-Type", "application/json")
-		// FIXME --- REMOVE SECRET KEY IN RESPONSE AFTER TESTING ---
-		json.NewEncoder(w).Encode(map[string]string{"session_id": session.ID, "nonce": session.Nonce, "secret_key": hex.EncodeToString(session.SecretKey)})
+		json.NewEncoder(w).Encode(map[string]string{"session_id": session.ID, "nonce": session.Nonce})
 
 
 	// --- POST /patch ---

@@ -17,15 +17,10 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-type RVHashValue struct {
-	Alg   string `json:"alg"`
-	Value string `json:"value"`
-}
-
 type ReferenceValue struct {
-	Name       string        `json:"name"`
-	Expiration string        `json:"expiration"`
-	HashValues []RVHashValue `json:"hash-value"`
+    Name       string   `json:"name"`
+    Value      []string `json:"value"`
+    Expiration string   `json:"expiration,omitempty"`
 }
 
 /**
@@ -198,7 +193,6 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 	}
 
 	if deletedSecret {
-		// FIXME CHECK DIE FUNCTION
 		dyn, err := dynamic.NewForConfig(clients.LocalCfg)
 		if err != nil {
 			return fmt.Errorf("dynamic client: %w", err)
@@ -296,29 +290,26 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 
 			// check if newMrConfigId is already present
 			hasNew := false
-			newSlice := make([]RVHashValue, 0, len(list[i].HashValues))
+			newSlice := make([]string, 0, len(list[i].Value))
 
-			for _, hv := range list[i].HashValues {
+			for _, value := range list[i].Value {
 				// Drop entries with oldMrConfigId; keep everything else
-				if hv.Value == oldMrConfigId {
+				if value == oldMrConfigId {
 					foundOld = true
 					continue
 				}
-				if hv.Value == newMrConfigId {
+				if value == newMrConfigId {
 					hasNew = true
 				}
-				newSlice = append(newSlice, hv)
+				newSlice = append(newSlice, value)
 			}
 
 			// Add the new mr_config_id value if it is not present yet
 			if !hasNew {
-				newSlice = append(newSlice, RVHashValue{
-					Alg:   "sha256",
-					Value: newMrConfigId,
-				})
+				newSlice = append(newSlice, newMrConfigId)
 			}
 
-			list[i].HashValues = newSlice
+			list[i].Value = newSlice
 		}
 
 		if !foundMrConfigIdObj {

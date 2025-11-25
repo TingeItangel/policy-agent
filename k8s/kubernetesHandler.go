@@ -265,14 +265,6 @@ func WaitForDeploymentRollout(
 * Returns the mr_config_id as string or an error if the retrieval fails.
  */
 func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (string, error) {
-	// DEBUG ----------------- DEBUG -----------------
-	// FIXME: DEBUG SKIP MR CONFIG ID FETCH. REMOVE IN PRODUCTION
-	if (os.Getenv("DEBUG_SKIP_MR_CONFIG_ID_FETCH") == "1") {
-		log.Printf("DEBUG_SKIP_MR_CONFIG_ID_FETCH is set, returning dummy mr_config_id")
-		return "DUMMY_MR_CONFIG_ID_FOR_DEBUGGING_PURPOSES_ONLY", nil
-	}
-	// DEBUG ----------------- DEBUG -----------------
-	
 	ctx := context.Background()
 
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
@@ -365,7 +357,7 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 						} `json:"quote"`
 					} `json:"tdx"`
 				} `json:"ear.veraison.annotated-evidence"`
-			} `json:"cpu"`
+			} `json:"cpu0"`
 		} `json:"submods"`
 	}
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
@@ -497,31 +489,6 @@ func kubeconfigPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	return home + string(os.PathSeparator) + ".kube" + string(os.PathSeparator) + "config"
-}
-
-
-/**
-* Check if a Deployment has fully rolled out
- */
-func isDeploymentRolledOut(dep *appsv1.Deployment) bool {
-    // No replicas defined means there is nothing to roll out
-    if dep.Spec.Replicas == nil {
-        return true
-    }
-
-    desired := *dep.Spec.Replicas
-
-    if dep.Status.UpdatedReplicas < desired {
-        return false
-    }
-    if dep.Status.ReadyReplicas < desired {
-        return false
-    }
-    if dep.Status.AvailableReplicas < desired {
-        return false
-    }
-
-    return true
 }
 
 

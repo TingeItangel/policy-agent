@@ -630,17 +630,14 @@ Es wird auf das vorhandensein dieser Struktur geprüft und entsprechend an diese
 
 ## Local Cluster
 
-### 1. Redis im local Cluster starten (namespace: `policy-agent`)
+### 1. Policy-Agent-RBAC anlegen
 
-- `kubectl apply -f ./deployments/redis.yaml`
-
-### 2. Policy-Agent-RBAC anlegen
-
+- Namespace von Trustee anpassen (z. B. `confidential-containers-system` oder `operators`)
 - `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
 
-### 3. Secrets im lokalen Cluster für Policy-Agent anlegen
+### 2. Secrets im lokalen Cluster für Policy-Agent anlegen
 
-#### 3.1 Remote Cluster Credentials
+#### 2.1 Remote Cluster Credentials
 
 - API-Server-URL, token und CA des remote clusters müssen als Dateien vorliegen (siehe oben).
 
@@ -649,7 +646,7 @@ Es wird auf das vorhandensein dieser Struktur geprüft und entsprechend an diese
 kubectl -n policy-agent create secret generic remote-cluster-cred --from-file=api-server-url=/tmp/remote.api.server.url --from-file=token=/tmp/policy-agent-sa.token --from-file=ca.crt=/tmp/remote.ca.crt
 ```
 
-#### 3.2 Server Zertifikate
+#### 2.2 Server Zertifikate
 
 - Server Zertifikat und Key für TLS im lokalen Cluster als secret anlegen
 
@@ -668,7 +665,20 @@ openssl req -x509 -newkey rsa:4096 \
 kubectl -n policy-agent create secret tls policy-agent-tls --cert=/tmp/server.crt --key=/tmp/server.key
 ```
 
-### 4. Policy-Agent-Deployment erstellen
+#### 2.3 DockerHub Credentials (optional)
+
+- Wenn das policy-agent Image aus einem privaten Registry (z. B. DockerHub private repo) gezogen werden soll, müssen die credentials als secret im lokalen cluster angelegt werden.
+
+```bash
+kubectl create secret docker-registry dockerhub-cred \
+  --docker-server=https://index.docker.io/v1/ \
+  --docker-username=<DEIN_DOCKERHUB_USERNAME> \
+  --docker-password='<DEIN_DOCKERHUB_TOKEN_ODER_PASSWORT>' \
+  --docker-email='dummy@example.com' \
+  --namespace=policy-agent
+```
+
+### 3. Policy-Agent-Deployment erstellen
 
 - `kubectl apply -f ./deployments/policy-agent-deployment.yaml`
 - **WICHTIG**: im Deployment-File müssen die `ENV` Variablen gesetzte werden:
@@ -680,6 +690,9 @@ kubectl -n policy-agent create secret tls policy-agent-tls --cert=/tmp/server.cr
 
 - Policy-Agent-Service wird automatisch mit dem Deployment erstellt.
   - Je nach Netzwerksetup muss der Service-Typ angepasst werden (NodePort oder LoadBalancer), um extern erreichbar zu sein.
+- Redis Deployment und Service wird automatisch mit dem Deployment erstellt.
+
+### Test-Watcher
 
 # Limitationen oder offene Fragen
 

@@ -694,6 +694,45 @@ kubectl create secret docker-registry dockerhub-cred \
 
 ### Test-Watcher
 
+1. Lade die ConfigMap für das Script in den lokalen Cluster:
+
+```bash
+kubectl create configmap policy-agent-script \
+  --from-file=post-request-script.sh=/home/mega/policy-agent/post-request-script.sh
+configmap/policy-agent-script created
+```
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: watcher
+  name: watcher
+  annotations:
+    io.containerd.cri.runtime-handler: kata-qemu-tdx
+    io.katacontainers.config.hypervisor.cc_init_data: H4sIAAAAAAAAA+2VW6...
+    io.katacontainers.config.hypervisor.kernel_params: >
+      agent.guest_components_rest_api=all
+spec:
+  runtimeClassName: kata-qemu-tdx
+  dnsPolicy: ClusterFirst
+
+  containers:
+    - name: runner
+      image: ubuntu:22.04
+      volumeMounts:
+        - name: script-volume
+          mountPath: /app/config/post-request-script.sh
+          subPath: post-request-script.sh
+
+  volumes:
+    - name: script-volume
+      configMap:
+        name: policy-agent-script
+        defaultMode: 0755 # macht das Script im Pod direkt ausführbar
+```
+
 # Limitationen oder offene Fragen
 
 - [ ] mehrere keys werden unter dem gleichen k8s secret gespeichert. Gibt es eine Limitation der Größe von k8s secrets? Sonst müsste für jede session ein eigenes secret angelegt werden. Wie verhält sich das k8s system wenn ganz viele secrets angelegt werden?
@@ -742,3 +781,6 @@ expectedSignature = Base64Encode( HMAC-SHA256(message, secretKey) )
 - [ ] Request mit oldMr = NewMr
   - Erwartung: Der Wert wird in der kbs-config gelöscht und neu hinzugefügt. Ergebnis der gleiche Wert bleibt bestehen.
   - Tatsache: Der Wert wird gelöscht, aber nicht neu hinzugefügt. (Running Condition?)
+- [ ] Running Condition: secret wird bei `auth` request in trustee gespeichert. Falls der `patch` request sofort danach kommt, hat trustee das Secret noch nicht verfügbar.
+- Lösungsidee: retry mechanismus bei Requester um das Secret zu bekommen
+- Lösungsidee 2: Delay in policy-agent einbauen, bevor die Response für den `auth` request zurückgeschickt wird.

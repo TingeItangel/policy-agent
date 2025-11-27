@@ -3,6 +3,7 @@ package patch
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"policy-agent/k8s"
 	"policy-agent/security"
@@ -34,6 +35,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	// Get Annotation field value from deployment
 	b64InitData, err := k8s.GetInitDataFromAnnotation(deployment)
 	if err != nil {
+		log.Printf("Error getting initData annotation: %v", err)
 		http.Error(w, "Failed to get initData annotation from deployment", http.StatusBadRequest)
 		return
 	}
@@ -95,7 +97,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		return
 	}
 
-	// TODO: Use Queue for rollout wait and handle other requests meanwhile
+	// NOTE: Queues can be used for rollout wait and handle other requests meanwhile
 
 	// --- Wait for Deployment rollout ---
 	err = k8s.WaitForDeploymentRollout(clients.Remote, req.Body.Namespace, req.Body.DeploymentName, 2*time.Minute)

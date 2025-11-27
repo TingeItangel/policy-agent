@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: policy-agent
 ---
+############### Redis Deployment ###############
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -89,7 +90,7 @@ spec:
 
       containers:
         - name: agent
-          image: policy-agent:test-local
+          image: cmvek/policy-agent:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: POD_NAMESPACE
@@ -97,14 +98,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
 
-            #- name: DEBUG_SKIP_MR_CONFIG_ID_FETCH
-            #  value: "1" # Set to "1" to skip fetching mr_config_id for debugging
-
             - name: REDIS_ADDR
               value: "redis:6379"
 
             - name: KBS_NAMESPACE
-              value: "operators"
+              value: "trustee-operator-system"
 
             - name: KBS_CONFIG_NAME
               value: "kbsconfig-sample"
@@ -160,11 +158,16 @@ kind: Service
 metadata:
   name: policy-agent
   namespace: policy-agent
+  annotations:
+    metallb.universe.tf/allow-shared-ip: kbs-and-policy
 spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.48.25.221
+  externalTrafficPolicy: Cluster
   selector:
     app: policy-agent
   ports:
     - name: https
-      port: 8443 # Service-Port
-      targetPort: 8443 # ContainerPort (Webserver in Policy-Agent-Pod)
+      port: 8443
+      targetPort: 8443
       protocol: TCP

@@ -56,8 +56,7 @@ spec:
     - protocol: TCP
       port: 6379
       targetPort: 6379
-      nodePort: 30079
-  type: NodePort
+  type: ClusterIP
 ---
 ############### Policy Agent Deployment ###############
 apiVersion: apps/v1
@@ -76,6 +75,8 @@ spec:
         app: policy-agent
     spec:
       serviceAccountName: policy-agent-sa
+      imagePullSecrets:
+        - name: dockerhub-cred # Secret for pulling images from private Docker Hub repository
 
       # initContainer to wait for Redis to be ready
       initContainers:
@@ -91,7 +92,7 @@ spec:
       containers:
         - name: agent
           image: cmvek/policy-agent:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE
               valueFrom:

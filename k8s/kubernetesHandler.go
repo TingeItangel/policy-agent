@@ -31,7 +31,10 @@ type Clients struct {
 	RemoteCfg  *rest.Config
 }
 
-const initDataAnnotationKey = "io.katacontainers.config.runtime.cc_init_data"
+const initDataAnnotationKey = os.Getenv("INITDATA_ANNOTATION_KEY")
+if initDataAnnotationKey == "" {
+	initDataAnnotationKey = "io.katacontainers.config.hypervisor.cc_init_data"
+}
 
 type ClientSource int
 

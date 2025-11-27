@@ -124,7 +124,7 @@ func CheckServiceAccountExists(clients *Clients) (error) {
 * Returns an error if the annotation is not found or if the object is not a Deployment.
  */
 func GetInitDataFromAnnotation(runtimeObj runtime.Object) (string, error) {
-	const initDataAnnotationKey = os.Getenv("INITDATA_ANNOTATION_KEY")
+	const initDataAnnotationKey := os.Getenv("INITDATA_ANNOTATION_KEY")
 	if initDataAnnotationKey == "" {
 		initDataAnnotationKey = "io.katacontainers.config.hypervisor.cc_init_data"
 	}
@@ -155,7 +155,7 @@ func GetInitDataFromAnnotation(runtimeObj runtime.Object) (string, error) {
 * with the annotationValue. Returns an error if the update fails.
  */
 func UpdateAnnotationValue(client *kubernetes.Clientset, runtimeObj runtime.Object, annotationValue, namespace string) error {
-	const initDataAnnotationKey = os.Getenv("INITDATA_ANNOTATION_KEY")
+	const initDataAnnotationKey := os.Getenv("INITDATA_ANNOTATION_KEY")
 	if initDataAnnotationKey == "" {
 		initDataAnnotationKey = "io.katacontainers.config.hypervisor.cc_init_data"
 	}

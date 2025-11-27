@@ -108,6 +108,9 @@ spec:
             - name: KBS_CONFIG_NAME
               value: "kbsconfig-sample"
 
+            - name: INITDATA_ANNOTATION_KEY
+              value: "io.katacontainers.config.hypervisor.cc_init_data"
+
             - name: REMOTE_API_SERVER_URL
               valueFrom:
                 secretKeyRef:

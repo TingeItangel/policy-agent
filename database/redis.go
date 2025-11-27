@@ -81,7 +81,7 @@ func SaveSessionData(data SessionData) error {
 		return fmt.Errorf("failed to save session data: %w", err)
 	}
 
-	log.Printf("session %s saved (ttl=%s)", truncateID(data.ID), data.TTL)
+	log.Printf("session %s saved (ttl=%s)", data.ID, data.TTL)
 	return nil
 }
 
@@ -176,14 +176,6 @@ func DeleteSessionData(sessionID string) error {
 	key := "session:" + sessionID
 	result := rdb.Del(ctx, key)
 	return result.Err()
-}
-
-// --- helper functions ---
-func truncateID(id string) string {
-	if len(id) <= 8 {
-		return id
-	}
-	return id[:4] + "…" + id[len(id)-4:]
 }
 
 /**

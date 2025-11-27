@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	redis "policy-agent/database"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -318,7 +319,7 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 
 		if !foundOld {
 			// Explicitly signal that the given oldMrConfigId does not exist
-			log.Printf("⚠️  warning: oldMrConfigId %q not found in ConfigMap %s/%s", oldMrConfigId, rvpsNamespace, configMapName)
+			log.Printf("⚠️  warning: oldMrConfigId not found in ConfigMap %s/%s", rvpsNamespace, configMapName)
 			// NOTE: old value might not be present, so we do not error out here.
 		}
 
@@ -346,3 +347,64 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 	return nil
 }
 
+/**
+* DeleteExpiredSessions removes expired sessions from the Trustee k8s secret.
+* It takes a list of active session IDs to avoid deleting valid sessions.
+*/
+func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
+	ctx := context.Background()
+	ns := os.Getenv("KBS_NAMESPACE")
+	if ns == "" {
+		ns = "trustee-operator-system"
+	}
+	secretName := "pa-sessions"
+
+	// Get all keys from local secret: pa-sessions
+
+	// Compare with redis keys, delete those not in redis anymore
+
+	 // --- Set of active sessions ---
+    active := make(map[string]struct{}, len(redisKeys))
+    for _, id := range redisKeys {
+		uuid := strings.TrimPrefix(id, "session:") // remove "session:" prefix if present
+        active[uuid] = struct{}{}
+    }
+
+	secret, err := clients.Local.CoreV1().Secrets(ns).Get(
+        ctx,
+        secretName,
+        metav1.GetOptions{},
+    )
+    if err != nil {
+        return fmt.Errorf("failed to get secret %s/%s: %w",
+            ns, secretName, err)
+    }
+
+    changed := false
+
+    // secret.Data ist map[string][]byte
+    for key := range secret.Data {
+        if _, ok := active[key]; !ok {
+            log.Printf("removing expired session from secret: %s", key)
+            delete(secret.Data, key)
+            changed = true
+        }
+    }
+
+  if changed {
+        _, err = clients.Local.CoreV1().Secrets(ns).Update(
+            ctx,
+            secret,
+            metav1.UpdateOptions{},
+        )
+        if err != nil {
+            return fmt.Errorf("failed to update secret %s/%s: %w",
+                ns, secretName, err)
+        }
+        log.Println("Secret cleanup completed ✔")
+    } else {
+        log.Println("No expired sessions found. Nothing to clean")
+    }
+
+    return nil
+}

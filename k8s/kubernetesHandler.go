@@ -146,7 +146,6 @@ func GetInitDataFromAnnotation(runtimeObj runtime.Object) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("annotation %q not found", initDataAnnotationKey)
 	}
-
 	return base64InitData, nil
 }
 
@@ -273,7 +272,7 @@ func WaitForDeploymentRollout(
  */
 func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (string, error) {
 	ctx := context.Background()
-
+	log.Printf("Getting new mr_config_id from remote cluster for deployment %s in namespace %s", deploymentName, namespace)
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
 	})
@@ -282,6 +281,7 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	}
 
 	pod := pods.Items[0].Name
+	log.Printf("Using pod %s to get new mr_config_id", pod)
 
 	// Get Token command
 	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value
@@ -315,15 +315,9 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 		Stderr: &stderr,
 	})
 
-	// FIXME: DEBUG PRINT OUTPUT
-	
-	log.Printf("Exec stdout: %s", stdout.String())
-	log.Printf("Exec stderr: %s", stderr.String())
-
 	if err != nil {
 		return "", fmt.Errorf("exec error: %v, stderr=%s", err, stderr.String())
 	}
-
 
 	raw := strings.TrimSpace(stdout.String())
 	var resp struct {
@@ -378,7 +372,8 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	if mr == "" {
 		return "", fmt.Errorf("mr_config_id empty")
 	}
-
+	
+	log.Printf("Retrieved new mr_config_id: %s", mr)
 	return mr, nil
 }
 

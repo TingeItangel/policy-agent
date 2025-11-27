@@ -41,6 +41,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "Failed to save session data: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		log.Printf("Storing session in Redis successfully: ID=%s", session.ID)
 		
 		// --- Store session.secretKey in Trustee ---
 		err = k8s.StoreSessionInTrustee(clients, r.Context(), session)
@@ -48,7 +49,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "Failed to store session data in trustee: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Session stored in trustee: ID=%s, Nonce=%s", session.ID, session.Nonce)
+		log.Printf("Session stored in trustee successfully: ID=%s, Nonce=%s", session.ID, session.Nonce)
 		
 		// --- Return session id and nonce to client ---
 		w.Header().Set("Content-Type", "application/json")
@@ -71,13 +72,13 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 			return
 		}
-		// save into your typed struct
+		// save into own typed struct
 		if err := json.Unmarshal(data, &req.Body); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		// Check supported hash algorithm
+		// --- Check supported hash algorithm ---
 		algo := strings.ToUpper(req.Header.HashAlgo)
 		if algo != "SHA256" {
 			http.Error(w, "unsupported X-Hash-Algorithm", http.StatusBadRequest)
@@ -91,17 +92,18 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "content hash mismatch", http.StatusUnauthorized)
 			return
 		}
+		log.Printf("Request body hash verified successfully for session %s", req.Body.SessionID)
 
-		// Get Session data from redis for validation
+		// --- Retrieve Session Data from Redis ---
 		savedSession, err := redis.GetSessionData(req.Body.SessionID)
 		if err != nil {
 			http.Error(w, "Failed to retrieve session data: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		log.Printf("Session data retrieved from Redis successfully: ID=%s", savedSession.ID)
 
 		// --- Validate Redis Session ---
-		// Check TTL of Nonce
-		if savedSession.TTL <= 0 {
+		if savedSession.TTL <= 0 { // Check TTL of Nonce
 			// Delete session data from Redis
 			_ = redis.DeleteSessionData(savedSession.ID)
 			http.Error(w, "Session has expired", http.StatusUnauthorized)
@@ -123,46 +125,78 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		log.Printf("Patch request verified successfully for session %s", req.Body.SessionID)
 		
 		// --- Run Patch ---
+		log.Printf("Applying patch to deployment %s in namespace %s", req.Body.DeploymentName, req.Body.Namespace)
 		patch.PatchHandler(clients, w, req)
-
+		log.Printf("Patch applied successfully to deployment %s in namespace %s", req.Body.DeploymentName, req.Body.Namespace)
+		
 		// --- Delete session from trustee ---
 		err = k8s.DeleteTrusteeSession(clients, savedSession)
 		if err != nil {
 			log.Printf("Failed to delete session data from trustee: %v", err)
 		}
+		log.Printf("Session data deleted from trustee successfully: ID=%s", savedSession.ID)
 		// --- Nonce/Session consumption (Replay protection) ---
 		_ = redis.DeleteSessionData(savedSession.ID)
-	
+		log.Printf("Session data deleted from Redis successfully: ID=%s", savedSession.ID)
+		
+		// --- Return success ---
+		log.Println("Patch applied successfully")
 		w.Write([]byte("Patched successfully\n"))
 
 	default:
+		log.Printf("Unsupported HTTP method: %s", r.Method)
 		http.Error(w, "Only GET or POST allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// Cleanup Routine
+func cleanupRoutine(clients *k8s.Clients) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		// Load all sessionIDs from redis (expired are automatically deleted by redis)
+		sessionIDs, err := redis.GetAllSessionIDs()
+		if err != nil {
+			log.Printf("Cleanup-Error: loading session IDs from Redis: %v", err)
+			continue
+		}
+		err = k8s.DeleteExpiredSessions(clients, sessionIDs)
+		if err != nil {
+			log.Printf("Cleanup-Error: deleting expired sessions from trustee: %v", err)
+		}
 	}
 }
 
 func main() {
 	
 	// --- Initialize Redis client ---
+	log.Println("Initializing Redis client...")
 	if err := redis.InitRedis(); err != nil {
 		log.Fatalf("Redis init failed: %v", err)
 	}
+	log.Println("Redis client initialized successfully.")
 
 	// --- Initialize Kubernetes clients ---
+	log.Println("Initializing Kubernetes clients...")
 	clients, err := k8s.InitClients()
 	if err != nil { log.Fatal(err) }
+	log.Println("Kubernetes clients initialized successfully.")
 
 	// --- Ping Kubernetes API servers to verify connectivity ---
 	err = k8s.PingAPI(context.Background(), clients)
 	if err != nil {
 		log.Fatalf("Kubernetes API ping failed: %v", err)
 	}
-	log.Println("Kubernetes clients initialized successfully.")
+	log.Println("Kubernetes API ping successful.")
 	
 	// --- Check ServiceAccount existence ---
 	err = k8s.CheckServiceAccountExists(clients)
 	if err != nil {
 		log.Fatalf("ServiceAccount check failed: %v", err)
 	}
+	log.Println("ServiceAccount check successful.")
 
 	// --- Set up the HTTP server with TLS ---
 	// Handle GET request to init a session
@@ -200,6 +234,10 @@ func main() {
 		Addr:      ":8443",
 		TLSConfig: tlsConfig,
 	}
+
+	// --- Start cleanup routine ---
+	log.Println("Starting cleanup routine...")
+	go cleanupRoutine(clients)
 
 	// --- Start https server ---
 	log.Println("Starting HTTPS server on :8443...")

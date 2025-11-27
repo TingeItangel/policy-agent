@@ -148,3 +148,34 @@ func truncateID(id string) string {
 	if len(id) <= 8 { return id }
 	return id[:4] + "…" + id[len(id)-4:]
 }
+
+/**
+* Get all session IDs stored in Redis
+*/
+func GetAllSessionIDs() ([]string, error) {
+	if rdb == nil {
+		return nil, fmt.Errorf("redis client not initialized")
+	}
+
+    ctx := context.Background()
+    var cursor uint64
+    var keys []string
+
+    for {
+        var scanKeys []string
+        var err error
+		// Scan for keys with pattern "session:*" 500 at a time
+        scanKeys, cursor, err = rdb.Scan(ctx, cursor, "session:*", 500).Result()
+        if err != nil {
+            return nil, err
+        }
+
+        keys = append(keys, scanKeys...)
+
+        if cursor == 0 { // done scanning
+            break
+        }
+    }
+
+    return keys, nil
+}

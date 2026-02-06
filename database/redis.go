@@ -12,16 +12,17 @@ import (
 )
 
 var (
-	rdb *redis.Client          // Redis client for storing nonces
-	ctx = context.Background() // Context for Redis operations
+	rdb                *redis.Client          // Redis client for storing nonces
+	ctx                = context.Background() // Context for Redis operations
 	ErrSessionNotFound = errors.New("session not found")
 )
 
 type SessionData struct {
-	ID       string
-	Nonce    string
-	TTL      time.Duration
+	ID        string
+	Nonce     string
+	TTL       time.Duration
 	SecretKey []byte
+	used      bool // whether the session has been used
 }
 
 /**
@@ -31,13 +32,13 @@ func InitRedis() error {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "redis:6379"
-    }
+	}
 	password := os.Getenv("REDIS_PASSWORD")
-	
+
 	rdb = redis.NewClient(&redis.Options{
 		Addr:     addr,     // e.g. "redis:6379"
 		Password: password, // "" if no password
-		DB:       0,      // use default DB
+		DB:       0,        // use default DB
 	})
 
 	// Check connection
@@ -51,7 +52,7 @@ func InitRedis() error {
 /**
 * Saving / overriding nonce and secret key under <sessionID> in redis database
  */
-func SaveSessionData(data SessionData) (error) {
+func SaveSessionData(data SessionData) error {
 	if rdb == nil {
 		return fmt.Errorf("redis client not initialized")
 	}
@@ -65,7 +66,7 @@ func SaveSessionData(data SessionData) (error) {
 	// Set TTL for the entire hash
 	_, err := rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 		// overwrite fields is allowed
-		if err := p.HSet(ctx, key, "nonce", data.Nonce, "secret_key", data.SecretKey).Err(); err != nil {
+		if err := p.HSet(ctx, key, "nonce", data.Nonce, "secret_key", data.SecretKey, "used", data.used).Err(); err != nil {
 			return err
 		}
 		// Set TTL for the session
@@ -126,8 +127,42 @@ func GetSessionData(sessionID string) (SessionData, error) {
 		Nonce:     nonce,
 		SecretKey: []byte(secret),
 		TTL:       ttl,
+		used:      m["used"] == "1" || m["used"] == "true",
 	}
 	return sessionData, nil
+}
+
+/**
+* Mark session as used in redis database
+ */
+func MarkSessionAsUsed(sessionID string) error {
+	if rdb == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
+	key := "session:" + sessionID
+
+	// Set "used" field to true
+	if err := rdb.HSet(ctx, key, "used", true).Err(); err != nil {
+		return fmt.Errorf("failed to mark session as used: %w", err)
+	}
+	return nil
+}
+
+/**
+* Check if session is marked as used in redis database
+ */
+func IsSessionUsed(sessionID string) (bool, error) {
+	if rdb == nil {
+		return false, fmt.Errorf("redis client not initialized")
+	}
+	key := "session:" + sessionID
+
+	used, err := rdb.HGet(ctx, key, "used").Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to get session used status: %w", err)
+	}
+
+	return used == "1" || used == "true", nil
 }
 
 /**
@@ -145,37 +180,39 @@ func DeleteSessionData(sessionID string) error {
 
 // --- helper functions ---
 func truncateID(id string) string {
-	if len(id) <= 8 { return id }
+	if len(id) <= 8 {
+		return id
+	}
 	return id[:4] + "…" + id[len(id)-4:]
 }
 
 /**
 * Get all session IDs stored in Redis
-*/
+ */
 func GetAllSessionIDs() ([]string, error) {
 	if rdb == nil {
 		return nil, fmt.Errorf("redis client not initialized")
 	}
 
-    ctx := context.Background()
-    var cursor uint64
-    var keys []string
+	// ctx := context.Background()
+	var cursor uint64
+	var keys []string
 
-    for {
-        var scanKeys []string
-        var err error
+	for {
+		var scanKeys []string
+		var err error
 		// Scan for keys with pattern "session:*" 500 at a time
-        scanKeys, cursor, err = rdb.Scan(ctx, cursor, "session:*", 500).Result()
-        if err != nil {
-            return nil, err
-        }
+		scanKeys, cursor, err = rdb.Scan(ctx, cursor, "session:*", 500).Result()
+		if err != nil {
+			return nil, err
+		}
 
-        keys = append(keys, scanKeys...)
+		keys = append(keys, scanKeys...)
 
-        if cursor == 0 { // done scanning
-            break
-        }
-    }
+		if cursor == 0 { // done scanning
+			break
+		}
+	}
 
-    return keys, nil
+	return keys, nil
 }

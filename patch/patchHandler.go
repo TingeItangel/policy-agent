@@ -113,7 +113,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		return
 	}
 	log.Printf("Deployment %s/%s rollout completed successfully", req.Body.Namespace, req.Body.DeploymentName)
-	
+
 	// --- Get new config_mr value from the remote cluster ---
 	log.Printf("Getting new config_mr value from remote cluster for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
 	newMrConfigId, err := k8s.GetNewMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
@@ -134,6 +134,8 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Reference values in trustee patched successfully")
 	// NOTE: k8s restarts pods automatically: see kubectl describe deployment <name> -n <namespace>
 }
+
+// ---------- Internal Functions ----------
 
 /**
 * This function updates the policy data in the given Rego policy according to the request body.
@@ -237,10 +239,6 @@ func updatePolicyData(policyRego string, req types.PolicyRequestBody) (string, e
 	return updatedRego, nil
 }
 
-
-
-// ---------- Internal Functions ----------
-
 /**
 * Check if a string slice contains a value
  */
@@ -274,15 +272,15 @@ func cleanPolicyBlock(block string) string {
 * This function creates a the toml content with the old unchanged and new values
 * @return the toml content as string
  */
-func buildInitDataToml(parsed map[string]interface{}, newDataSection map[string]interface{}) (string, error) {
+func buildInitDataToml(parsed map[string]any, dataSection map[string]any) (string, error) {
 	// Extract top-level values
 	version, _ := parsed["version"].(string)
 	algorithm, _ := parsed["algorithm"].(string)
 
-	dataSection, ok := parsed["data"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("missing [data] section")
-	}
+	// dataSection, ok := parsed["data"].(map[string]interface{})
+	// if !ok {
+	// 	return "", fmt.Errorf("missing [data] section")
+	// }
 
 	// Extract in fixed order
 	policyRego, _ := dataSection["policy.rego"].(string)

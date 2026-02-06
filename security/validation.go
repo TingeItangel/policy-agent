@@ -21,14 +21,14 @@ import (
 * expectedHMAC = Base64Encode( HMAC-SHA256(message, secretKey) )
  */
 func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) error {
-    if len(secretKey) == 0 {
+	if len(secretKey) == 0 {
 		return fmt.Errorf("empty secret key")
 	}
 	if nonce == "" {
 		return fmt.Errorf("empty nonce")
 	}
 	givenHMAC = strings.TrimSpace(givenHMAC)
-	
+
 	// Remove scheme prefix if present
 	const scheme = "HMAC-SHA256 "
 	if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(scheme)) {
@@ -40,7 +40,7 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 	if err != nil {
 		return fmt.Errorf("bad signature encoding: %w", err)
 	}
-	
+
 	// Normalize secret key
 	keyRaw, err := normalizeKey(secretKey)
 	if err != nil {
@@ -56,35 +56,31 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 	mac := hmac.New(sha256.New, keyRaw)
 	mac.Write([]byte(msg))
 	expected := mac.Sum(nil)
-   
-    if !hmac.Equal(givenSig, expected) {
-        return fmt.Errorf("invalid signature")
-    }
-    return nil
+
+	if !hmac.Equal(givenSig, expected) {
+		return fmt.Errorf("invalid signature")
+	}
+	return nil
 }
 
 /**
 * Compare HashValue of Request Body and own calculation
 * returns true if hashes are same, false if not
  */
-func CompareHash(data []byte, hashAlgo string, hashValue string) bool {
-	// Calculate own hash over body
-	calculatedHash, err := calculateHash(data, hashAlgo)
-	if err != nil {
-		return false
-	}
-	// Compare calculated hash with the received one
-	if !strings.EqualFold(calculatedHash, hashValue) {
-		return false
-	}
-	return true
-}
-
-
+// func CompareHash(data []byte, hashAlgo string, hashValue string) bool {
+// 	// Calculate own hash over body
+// 	calculatedHash, err := calculateHash(data, hashAlgo)
+// 	if err != nil {
+// 		return false
+// 	}
+// 	// Compare calculated hash with the received one
+// 	if !strings.EqualFold(calculatedHash, hashValue) {
+// 		return false
+// 	}
+// 	return true
+// }
 
 // ---------- Internal Functions ----------
-
-
 
 /**
 * Normalize secret key from various formats to raw byte slice

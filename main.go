@@ -25,7 +25,6 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 	// --- Handle HTTP Methods ---
 	switch r.Method {
 
-
 	// --- GET /auth ---
 	case http.MethodGet:
 		// --- Generate session data ---
@@ -33,7 +32,8 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		session.ID = security.NewNonce()
 		session.Nonce = security.NewNonce()
 		session.SecretKey = security.NewSecretKey()
-		session.TTL = 5 * time.Minute // 5 minutes
+		session.TTL = 1 * time.Minute // 1 minute
+		session.used = false
 
 		// --- Save data in redis db ---
 		err := redis.SaveSessionData(session)
@@ -42,7 +42,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			return
 		}
 		log.Printf("Storing session in Redis successfully: ID=%s", session.ID)
-		
+
 		// --- Store session.secretKey in Trustee ---
 		err = k8s.StoreSessionInTrustee(clients, r.Context(), session)
 		if err != nil {
@@ -50,20 +50,19 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			return
 		}
 		log.Printf("Session stored in trustee successfully: ID=%s, Nonce=%s", session.ID, session.Nonce)
-		
+
 		// --- Return session id and nonce to client ---
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"session_id": session.ID, "nonce": session.Nonce})
-
 
 	// --- POST /patch ---
 	case http.MethodPost:
 		var req types.PolicyRequest
 
-		req.Header.Nonce = r.Header.Get("X-Nonce") // e.g. "cce471c3-1d85-4787-8299-f5c222c2a82f"
+		req.Header.Nonce = r.Header.Get("X-Nonce")             // e.g. "cce471c3-1d85-4787-8299-f5c222c2a82f"
 		req.Header.HashAlgo = r.Header.Get("X-Hash-Algorithm") // e.g. "SHA256"
-		req.Header.HashValue = r.Header.Get("X-Hash-Value") // SHA256<req.body> e.g. "abcdef123456..."
-		req.Header.HMAC = r.Header.Get("Authorization") // e.g. "HMAC-SHA256 base64signature"
+		req.Header.HashValue = r.Header.Get("X-Hash-Value")    // SHA256<req.body> e.g. "abcdef123456..."
+		req.Header.HMAC = r.Header.Get("Authorization")        // e.g. "HMAC-SHA256 base64signature"
 
 		// --- Parse Body to PolicyRequest type ---
 		data, err := io.ReadAll(r.Body) // Read raw request body
@@ -103,12 +102,32 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		log.Printf("Session data retrieved from Redis successfully: ID=%s", savedSession.ID)
 
 		// --- Validate Redis Session ---
+		// Check if session is used
+		used, err := redis.IsSessionUsed(savedSession.ID)
+		if err != nil {
+			http.Error(w, "Failed to check session usage: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if used {
+			http.Error(w, "session already used", http.StatusUnauthorized)
+			return
+		}
+		// Mark session as used
+		err = redis.MarkSessionAsUsed(savedSession.ID)
+		if err != nil {
+			http.Error(w, "Failed to mark session as used: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Check TTL
 		if savedSession.TTL <= 0 { // Check TTL of Nonce
 			// Delete session data from Redis
 			_ = redis.DeleteSessionData(savedSession.ID)
 			http.Error(w, "Session has expired", http.StatusUnauthorized)
 			return
 		}
+		log.Printf("Session verified successfully for session %s", savedSession.ID)
+
+		// --- Nonce Verification ---
 		// compare nonce to saved one
 		if subtle.ConstantTimeCompare([]byte(req.Header.Nonce), []byte(savedSession.Nonce)) != 1 {
 			http.Error(w, "invalid nonce", http.StatusUnauthorized)
@@ -123,12 +142,12 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		}
 
 		log.Printf("Patch request verified successfully for session %s", req.Body.SessionID)
-		
+
 		// --- Run Patch ---
 		log.Printf("Applying patch to deployment %s in namespace %s", req.Body.DeploymentName, req.Body.Namespace)
 		patch.PatchHandler(clients, w, req)
 		log.Printf("Patch applied successfully to deployment %s in namespace %s", req.Body.DeploymentName, req.Body.Namespace)
-		
+
 		// --- Delete session from trustee ---
 		err = k8s.DeleteTrusteeSession(clients, savedSession)
 		if err != nil {
@@ -138,7 +157,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		// --- Nonce/Session consumption (Replay protection) ---
 		_ = redis.DeleteSessionData(savedSession.ID)
 		log.Printf("Session data deleted from Redis successfully: ID=%s", savedSession.ID)
-		
+
 		// --- Return success ---
 		log.Println("Patch applied successfully")
 		w.Write([]byte("Patched successfully\n"))
@@ -170,7 +189,7 @@ func cleanupRoutine(clients *k8s.Clients) {
 }
 
 func main() {
-	
+
 	// --- Initialize Redis client ---
 	log.Println("Initializing Redis client...")
 	if err := redis.InitRedis(); err != nil {
@@ -181,7 +200,9 @@ func main() {
 	// --- Initialize Kubernetes clients ---
 	log.Println("Initializing Kubernetes clients...")
 	clients, err := k8s.InitClients()
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Println("Kubernetes clients initialized successfully.")
 
 	// --- Ping Kubernetes API servers to verify connectivity ---
@@ -190,7 +211,7 @@ func main() {
 		log.Fatalf("Kubernetes API ping failed: %v", err)
 	}
 	log.Println("Kubernetes API ping successful.")
-	
+
 	// --- Check ServiceAccount existence ---
 	err = k8s.CheckServiceAccountExists(clients)
 	if err != nil {
@@ -204,7 +225,7 @@ func main() {
 		handler(w, r, clients)
 	})
 	// Handle POST request to apply a policy update
-	http.HandleFunc("/patch",  func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/patch", func(w http.ResponseWriter, r *http.Request) {
 		handler(w, r, clients)
 	})
 

@@ -2,9 +2,9 @@ package security
 
 import (
 	"crypto/rand"
-	"fmt"
+	// "fmt"
 	"io"
-	redis "policy-agent/database"
+	// redis "policy-agent/database"
 
 	"github.com/google/uuid"
 )
@@ -15,7 +15,7 @@ import (
  * The client can retrieve this nonce and include it in their requests to ensure they are valid.
  * Can be used as session identifier as well.
  */
-func NewNonce() (string) {
+func NewNonce() string {
 	nonce := uuid.New().String()
 	return nonce
 }
@@ -27,18 +27,18 @@ func NewNonce() (string) {
  * If the nonce is expired or does not exist, it returns false.
  * After successful verification, the nonce is deleted to prevent replay attacks.
  */
-func isValidNonce(sessionID, nonce string) (error) {
-	// Check if the nonce exists in Redis
-	data, err := redis.GetSessionData(sessionID)
-	if data.Nonce == "" || data.Nonce != nonce || err != nil {
-		return fmt.Errorf("invalid nonce")
-	}
-	// Check TTL
-	if data.TTL <= 0 {
-		return fmt.Errorf("nonce %s is not valid or has expired", nonce)
-	}
-	return nil
-}
+// func isValidNonce(sessionID, nonce string) (error) {
+// 	// Check if the nonce exists in Redis
+// 	data, err := redis.GetSessionData(sessionID)
+// 	if data.Nonce == "" || data.Nonce != nonce || err != nil {
+// 		return fmt.Errorf("invalid nonce")
+// 	}
+// 	// Check TTL
+// 	if data.TTL <= 0 {
+// 		return fmt.Errorf("nonce %s is not valid or has expired", nonce)
+// 	}
+// 	return nil
+// }
 
 // ---------- secret key ----------
 

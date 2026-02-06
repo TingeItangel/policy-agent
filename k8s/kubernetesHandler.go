@@ -25,20 +25,11 @@ import (
 )
 
 type Clients struct {
-	Local      *kubernetes.Clientset // local cluster (policy-agent, trustee are deployed here)
-	LocalCfg   *rest.Config
-	Remote     *kubernetes.Clientset   // remote cluster (CoCos are deployed here)
-	RemoteCfg  *rest.Config
+	Local     *kubernetes.Clientset // local cluster (policy-agent, trustee are deployed here)
+	LocalCfg  *rest.Config
+	Remote    *kubernetes.Clientset // remote cluster (CoCos are deployed here)
+	RemoteCfg *rest.Config
 }
-
-
-type ClientSource int
-
-const (
-	SourceInCluster ClientSource = iota
-	SourceKubeconfig
-	SourceDirect // Host + BearerToken + CAData
-)
 
 type directOpts struct {
 	Host        string
@@ -46,8 +37,6 @@ type directOpts struct {
 	CAData      []byte
 	Insecure    bool
 }
-
-
 
 // ---------- Public Functions ----------
 
@@ -65,10 +54,10 @@ func InitClients() (*Clients, error) {
 	}
 
 	return &Clients{
-		Local:      local,
-		LocalCfg:   localCfg,
-		Remote:     remote,
-		RemoteCfg:  remoteCfg,
+		Local:     local,
+		LocalCfg:  localCfg,
+		Remote:    remote,
+		RemoteCfg: remoteCfg,
 	}, nil
 
 }
@@ -79,8 +68,8 @@ func InitClients() (*Clients, error) {
 * local cluster: to manage trustee ConfigMaps and Secrets and reference values
 * remote cluster: to patch deployments with updated annotations
 * Returns an error if the ServiceAccount does not exist or if the check fails.
-*/
-func CheckServiceAccountExists(clients *Clients) (error) {
+ */
+func CheckServiceAccountExists(clients *Clients) error {
 	// NOTE: Names of ServiceAccounts are expected to be "policy-agent-sa" but can be configured via ENV
 	localServiceAccountName := os.Getenv("LOCAL_SERVICEACCOUNT_NAME")
 	if localServiceAccountName == "" {
@@ -186,7 +175,7 @@ func UpdateAnnotationValue(client *kubernetes.Clientset, runtimeObj runtime.Obje
 /**
 * Get Deployment from cluster based on client and PolicyRequest
  */
-func GetDeploymentFromCluster(client *kubernetes.Clientset,req types.PolicyRequest) (*appsv1.Deployment, error) {
+func GetDeploymentFromCluster(client *kubernetes.Clientset, req types.PolicyRequest) (*appsv1.Deployment, error) {
 	deployments := client.AppsV1().Deployments(req.Body.Namespace)
 	if deployments == nil {
 		return nil, fmt.Errorf("failed to get deployments client for namespace %s", req.Body.Namespace)
@@ -203,74 +192,72 @@ func GetDeploymentFromCluster(client *kubernetes.Clientset,req types.PolicyReque
 
 /**
 * WaitForDeploymentRollout waits until the deployment has fully rolled out or the timeout is reached.
-*/
+ */
 func WaitForDeploymentRollout(
-    client kubernetes.Interface,
-    namespace, deploymentName string,
-    timeout time.Duration,
+	client kubernetes.Interface,
+	namespace, deploymentName string,
+	timeout time.Duration,
 ) error {
-    ctx, cancel := context.WithTimeout(context.Background(), timeout)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-    ticker := time.NewTicker(2 * time.Second)
-    defer ticker.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-    // remember target generation
-    dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
-    if err != nil {
-        return fmt.Errorf("get deployment: %w", err)
-    }
-    targetGeneration := dep.Generation
-    var desired int32 = 1
-    if dep.Spec.Replicas != nil {
-        desired = *dep.Spec.Replicas
-    }
+	// remember target generation
+	dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get deployment: %w", err)
+	}
+	targetGeneration := dep.Generation
+	var desired int32 = 1
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
 
-    for {
-        select {
-        case <-ctx.Done():
-            return fmt.Errorf("timeout waiting for deployment %s/%s rollout: %w", namespace, deploymentName, ctx.Err())
-        case <-ticker.C:
-            dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
-            if err != nil {
-                return fmt.Errorf("get deployment: %w", err)
-            }
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for deployment %s/%s rollout: %w", namespace, deploymentName, ctx.Err())
+		case <-ticker.C:
+			dep, err := client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("get deployment: %w", err)
+			}
 
 			// check if observed generation matches target generation
-            if dep.Status.ObservedGeneration < targetGeneration {
-                continue
-            }
+			if dep.Status.ObservedGeneration < targetGeneration {
+				continue
+			}
 
-            if dep.Status.UpdatedReplicas < desired {
-                continue
-            }
-            if dep.Status.ReadyReplicas < desired {
-                continue
-            }
-            if dep.Status.AvailableReplicas < desired {
-                continue
-            }
-            if dep.Status.UnavailableReplicas > 0 {
-                continue
-            }
+			if dep.Status.UpdatedReplicas < desired {
+				continue
+			}
+			if dep.Status.ReadyReplicas < desired {
+				continue
+			}
+			if dep.Status.AvailableReplicas < desired {
+				continue
+			}
+			if dep.Status.UnavailableReplicas > 0 {
+				continue
+			}
 
-            return nil
-        }
-    }
+			return nil
+		}
+	}
 }
-
-
 
 /**
 * Get new config_mr value from the remote cluster for the given deployment and namespace
 * The deployment must be running in the remote cluster and have the following command as allowed command in the kata-policy:
 * kubectl exec -n <namespace> <pod> -- curl -s http://127.0.0.1:8006/aa/token?token_type=kbs"
-* 
+*
 * This command retrieves the current mr_config_id from the KBS token inside the CoCo pod.
 *
 * Returns the mr_config_id as string or an error if the retrieval fails.
  */
-func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (string, error) {
+func GetNewMrConfigId(clients *Clients, deploymentName, namespace string) (string, error) {
 	ctx := context.Background()
 	log.Printf("Getting new mr_config_id from remote cluster for deployment %s in namespace %s", deploymentName, namespace)
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
@@ -366,21 +353,18 @@ func GetNewMrConfigId(clients *Clients , deploymentName, namespace string) (stri
 	}
 
 	mr := strings.TrimSpace(payload.Submods.CPU.
-	EarVeraisonAnnotatedEvidence.TDX.
-	Quote.Body.MrConfigID)
-		
+		EarVeraisonAnnotatedEvidence.TDX.
+		Quote.Body.MrConfigID)
+
 	if mr == "" {
 		return "", fmt.Errorf("mr_config_id empty")
 	}
-	
+
 	log.Printf("Retrieved new mr_config_id: %s", mr)
 	return mr, nil
 }
 
-
-
 // ---------- Internal Functions ----------
-
 
 /**
 * Create Kubernetes client for local cluster
@@ -392,7 +376,9 @@ func newLocalClient() (*kubernetes.Clientset, *rest.Config, error) {
 	if cfg, err := rest.InClusterConfig(); err == nil {
 		tune(cfg)
 		cs, err := kubernetes.NewForConfig(cfg)
-		if err != nil { return nil, nil, err }
+		if err != nil {
+			return nil, nil, err
+		}
 		return cs, cfg, nil
 	}
 
@@ -405,10 +391,14 @@ func newLocalClient() (*kubernetes.Clientset, *rest.Config, error) {
 	}
 	loading := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kc}
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loading, over).ClientConfig()
-	if err != nil { return nil, nil, err }
+	if err != nil {
+		return nil, nil, err
+	}
 	tune(cfg) // apply defaults
 	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil { return nil, nil, err }
+	if err != nil {
+		return nil, nil, err
+	}
 	return cs, cfg, nil
 }
 
@@ -416,47 +406,46 @@ func newLocalClient() (*kubernetes.Clientset, *rest.Config, error) {
 * Create Kubernetes client for remote cluster
  */
 func newRemoteClient(_ *kubernetes.Clientset) (*kubernetes.Clientset, *rest.Config, error) {
-	remoteAPIServerURL  := os.Getenv("REMOTE_API_SERVER_URL")
-	remoteTokenFile  := os.Getenv("REMOTE_TOKEN_FILE")
-	remoteCAFile  := os.Getenv("REMOTE_CA_FILE")
+	remoteAPIServerURL := os.Getenv("REMOTE_API_SERVER_URL")
+	remoteTokenFile := os.Getenv("REMOTE_TOKEN_FILE")
+	remoteCAFile := os.Getenv("REMOTE_CA_FILE")
 
-	if remoteAPIServerURL  == "" || remoteTokenFile  == "" {
+	if remoteAPIServerURL == "" || remoteTokenFile == "" {
 		return nil, nil, fmt.Errorf("REMOTE_API_SERVER_URL or REMOTE_TOKEN_FILE not set")
 	}
 
 	token, err := os.ReadFile(remoteTokenFile)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read remote token file %s: %w", remoteTokenFile , err)
+		return nil, nil, fmt.Errorf("failed to read remote token file %s: %w", remoteTokenFile, err)
 	}
 
 	var ca []byte
-	if remoteCAFile  != "" {
+	if remoteCAFile != "" {
 		ca, err = os.ReadFile(remoteCAFile)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read remote CA file %s: %w", remoteCAFile , err)
+			return nil, nil, fmt.Errorf("failed to read remote CA file %s: %w", remoteCAFile, err)
 		}
 	}
 
 	client, cfg, err := newDirectClient(directOpts{
-			Host:        remoteAPIServerURL,
-			BearerToken: strings.TrimSpace(string(token)),
-			CAData:      ca,
-			Insecure:    false,
-		})
-	
+		Host:        remoteAPIServerURL,
+		BearerToken: strings.TrimSpace(string(token)),
+		CAData:      ca,
+		Insecure:    false,
+	})
+
 	if err == nil {
 		return client, cfg, nil
 	}
 	return nil, nil, fmt.Errorf("failed to create remote client: no valid credentials found")
 }
 
-
 func newDirectClient(options directOpts) (*kubernetes.Clientset, *rest.Config, error) {
 	if options.Host == "" || options.BearerToken == "" {
 		return nil, nil, fmt.Errorf("direct client needs Host and BearerToken")
 	}
 	tls := rest.TLSClientConfig{Insecure: options.Insecure}
-	
+
 	if len(options.CAData) > 0 {
 		tls.CAData = options.CAData
 	}
@@ -475,7 +464,7 @@ func newDirectClient(options directOpts) (*kubernetes.Clientset, *rest.Config, e
 
 /**
 * apply some default tuning to rest.Config
-*/
+ */
 func tune(cfg *rest.Config) {
 	cfg.Timeout = 15 * time.Second
 	cfg.QPS = 20
@@ -483,8 +472,8 @@ func tune(cfg *rest.Config) {
 }
 
 /**
-* get kubeconfig path from KUBECONFIG env or default location 
-*/
+* get kubeconfig path from KUBECONFIG env or default location
+ */
 func kubeconfigPath() string {
 	if path := os.Getenv("KUBECONFIG"); path != "" {
 		return path
@@ -493,9 +482,7 @@ func kubeconfigPath() string {
 	return home + string(os.PathSeparator) + ".kube" + string(os.PathSeparator) + "config"
 }
 
-
 // ---------- Test Functions ----------
-
 
 /**
 * Ping the Kubernetes API server to verify connectivity
@@ -503,12 +490,16 @@ func kubeconfigPath() string {
 func PingAPI(ctx context.Context, clients *Clients) error {
 	// Ping local cluster
 	ver, err := clients.Local.ServerVersion()
-	if err != nil { return fmt.Errorf("api not reachable: %w", err) }
+	if err != nil {
+		return fmt.Errorf("api not reachable: %w", err)
+	}
 	fmt.Printf("Connected, version: %s\n", ver.GitVersion)
 
 	// Ping remote cluster
 	ver, err = clients.Remote.ServerVersion()
-	if err != nil { return fmt.Errorf("remote api not reachable: %w", err) }
+	if err != nil {
+		return fmt.Errorf("remote api not reachable: %w", err)
+	}
 	fmt.Printf("Connected to remote, version: %s\n", ver.GitVersion)
 
 	// ##########################################
@@ -518,7 +509,7 @@ func PingAPI(ctx context.Context, clients *Clients) error {
 	// deployments, err := clients.Local.AppsV1().Deployments("default").List(ctx, v1.ListOptions{})
 	// if err != nil { return fmt.Errorf("list deployments default: %w", err) }
 	// fmt.Printf("Found %d deployments in default\n", len(deployments.Items))
-	
+
 	// log.Printf("InitClients final: remoteTokenLen=%d remoteHost=%s",
 	// 	len(clients.RemoteCfg.BearerToken),
 	// 	clients.RemoteCfg.Host,
@@ -529,6 +520,6 @@ func PingAPI(ctx context.Context, clients *Clients) error {
 	// fmt.Printf("Found %d pods in default\n", len(pods.Items))
 
 	// END DEBUG Ping remote cluster to verify connectivity
-	
+
 	return nil
 }

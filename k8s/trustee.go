@@ -359,10 +359,6 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
 	}
 	secretName := "pa-sessions"
 
-	// Get all keys from local secret: pa-sessions
-
-	// Compare with redis keys, delete those not in redis anymore
-
 	 // --- Set of active sessions ---
     active := make(map[string]struct{}, len(redisKeys))
     for _, id := range redisKeys {
@@ -370,16 +366,22 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
         active[uuid] = struct{}{}
     }
 
+
+
 	secret, err := clients.Local.CoreV1().Secrets(ns).Get(
         ctx,
         secretName,
         metav1.GetOptions{},
     )
-    if err != nil {
-        return fmt.Errorf("failed to get secret %s/%s: %w",
-            ns, secretName, err)
-    }
-
+	// if secret does not exist, nothing to do
+	if errors.IsNotFound(err) {
+		log.Printf("No Trustee secret %s/%s found. Nothing to clean", ns, secretName)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get secret %s/%s: %w",
+			ns, secretName, err)
+	}
     changed := false
 
     // secret.Data ist map[string][]byte

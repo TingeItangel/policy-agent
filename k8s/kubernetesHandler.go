@@ -360,7 +360,7 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 		return "", fmt.Errorf("mr_config_id empty")
 	}
 
-	log.Printf("Retrieved new mr_config_id: %s", mr)
+	log.Printf("Retrieved mr_config_id: %s", mr)
 	return mr, nil
 }
 

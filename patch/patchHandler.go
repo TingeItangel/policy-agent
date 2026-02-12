@@ -76,7 +76,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		http.Error(w, "initData missing policy.rego", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Extracted policy.rego from initData successfully")
+	log.Printf("✅ Extracted policy.rego from initData successfully")
 
 	// --- Start policy update ---
 	log.Printf("Starting policy update for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
@@ -101,7 +101,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		http.Error(w, "Failed encrypt the new initdata in base64", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Updated and Re-encrypted updated initData successfully")
+	log.Printf("✅ Updated and Re-encrypted updated initData successfully")
 
 	// --- Apply patch in remote cluster ---
 	log.Printf("Applying updated initData annotation to deployment %s/%s in remote cluster", req.Body.Namespace, req.Body.DeploymentName)
@@ -110,7 +110,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		http.Error(w, "Failed to apply patch to remote cluster", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Patch applied successfully to deployment %s/%s in remote cluster", req.Body.Namespace, req.Body.DeploymentName)
+	log.Printf("✅ Patch applied successfully to deployment %s/%s in remote cluster", req.Body.Namespace, req.Body.DeploymentName)
 
 	// --- Wait for Deployment rollout ---
 	log.Printf("Waiting for deployment %s/%s rollout to complete", req.Body.Namespace, req.Body.DeploymentName)
@@ -119,7 +119,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		http.Error(w, "Timed out waiting for deployment rollout", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Deployment %s/%s rollout completed successfully", req.Body.Namespace, req.Body.DeploymentName)
+	log.Printf("✅ Deployment %s/%s rollout completed successfully", req.Body.Namespace, req.Body.DeploymentName)
 
 	// --- Get new config_mr value from the remote cluster ---
 	log.Printf("Getting new config_mr value from remote cluster for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
@@ -138,7 +138,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Reference values in trustee patched successfully")
+	log.Printf("✅ Reference values in trustee patched successfully")
 	// NOTE: k8s restarts pods automatically: see kubectl describe deployment <name> -n <namespace>
 }
 

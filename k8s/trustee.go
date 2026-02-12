@@ -168,10 +168,10 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 		// If no keys left: delete secret
 		if len(existing.Data) == 0 {
 			if err := secrets.Delete(ctx, secretName, metav1.DeleteOptions{}); err != nil {
-				return fmt.Errorf("delete empty secret %s/%s: %w", kbsNamespace, secretName, err)
+				return fmt.Errorf("🗑️ delete empty secret %s/%s: %w", kbsNamespace, secretName, err)
 			}
 			deletedSecret = true
-			log.Printf("🗑️  deleted empty secret %s/%s", kbsNamespace, secretName)
+			log.Printf("🗑️ deleted empty secret %s/%s", kbsNamespace, secretName)
 			return nil
 		}
 
@@ -179,7 +179,7 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 		if _, err := secrets.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("update secret %s/%s: %w", kbsNamespace, secretName, err)
 		}
-		log.Printf("🔧 removed key %q from secret %s/%s", keyName, kbsNamespace, secretName)
+		log.Printf("🗑️ removed key %q from secret %s/%s", keyName, kbsNamespace, secretName)
 		return nil
 	})
 	if err != nil {
@@ -229,7 +229,7 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 			if _, err := dyn.Resource(gvr).Namespace(kbsNamespace).Update(ctx, u, metav1.UpdateOptions{}); err != nil {
 				return fmt.Errorf("update KbsConfig %s/%s: %w", kbsNamespace, kbsCfgName, err)
 			}
-			log.Printf("🧹 removed secret %q from KbsConfig %s/%s", secretName, kbsNamespace, kbsCfgName)
+			log.Printf("🗑️ removed secret %q from KbsConfig %s/%s", secretName, kbsNamespace, kbsCfgName)
 		}
 	}
 	return nil
@@ -385,7 +385,7 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
     // secret.Data ist map[string][]byte
     for key := range secret.Data {
         if _, ok := active[key]; !ok {
-            log.Printf("removing expired session from secret: %s", key)
+            log.Printf("🗑️ removing expired session from secret: %s", key)
             delete(secret.Data, key)
             changed = true
         }
@@ -401,7 +401,7 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
             return fmt.Errorf("failed to update secret %s/%s: %w",
                 ns, secretName, err)
         }
-        log.Println("Secret cleanup completed ✔")
+        log.Println("✅ Secret cleanup completed ")
     } else {
         log.Println("No expired sessions found. Nothing to clean")
     }

@@ -257,9 +257,9 @@ func WaitForDeploymentRollout(
 *
 * Returns the mr_config_id as string or an error if the retrieval fails.
  */
-func GetNewMrConfigId(clients *Clients, deploymentName, namespace string) (string, error) {
+func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, error) {
 	ctx := context.Background()
-	log.Printf("Getting new mr_config_id from remote cluster for deployment %s in namespace %s", deploymentName, namespace)
+	log.Printf("Getting mr_config_id from remote cluster for deployment %s in namespace %s", deploymentName, namespace)
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
 	})
@@ -268,7 +268,7 @@ func GetNewMrConfigId(clients *Clients, deploymentName, namespace string) (strin
 	}
 
 	pod := pods.Items[0].Name
-	log.Printf("Using pod %s to get new mr_config_id", pod)
+	log.Printf("Using pod %s to get mr_config_id", pod)
 
 	// Get Token command
 	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value

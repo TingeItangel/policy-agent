@@ -25,6 +25,13 @@ import (
 func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyRequest) {
 
 	// --- Preparation ---
+	// --- Get current mr_config_id from  running deployment ---
+	oldMrConfigId, err := k8s.GetMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
+	if err != nil {
+		http.Error(w, "Failed to get current mr_config_id from remote cluster: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// find Deployment in the remote cluster
 	deployment, err := k8s.GetDeploymentFromCluster(clients.Remote, req)
 	if err != nil {
@@ -116,7 +123,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 
 	// --- Get new config_mr value from the remote cluster ---
 	log.Printf("Getting new config_mr value from remote cluster for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
-	newMrConfigId, err := k8s.GetNewMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
+	newMrConfigId, err := k8s.GetMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
 	if err != nil {
 		http.Error(w, "Failed to get new config_mr from remote cluster", http.StatusBadRequest)
 		return
@@ -126,7 +133,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 
 	// --- Patch reference values in trustee ---
 	log.Printf("Patching reference values in trustee")
-	err = k8s.UpdateReferenceValues(clients, newMrConfigId, req.Body.OldMrConfigId)
+	err = k8s.UpdateReferenceValues(clients, newMrConfigId, oldMrConfigId)
 	if err != nil {
 		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
 		return

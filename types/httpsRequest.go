@@ -15,7 +15,6 @@ type PolicyRequestBody struct {
 	Commands       []string `json:"commands"`       // e.g. ["echo 'hello'"]
 	Images         []string `json:"image"`          // e.g. ["nginx:latest"]
 	Deny           bool     `json:"deny"`           // true if the image and/or commands should be denied in the new policy
-	OldMrConfigId  string   `json:"oldMrConfigId"`  // e.g. the "old-ref-value" to delete old config_mr ref value in Trustee
 }
 
 type PolicyRequest struct {

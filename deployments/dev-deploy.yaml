@@ -24,7 +24,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
 
-            - name: DEBUG_SKIP_MR_CONFIG_ID_FETCH
+            - name: DEBUG_GET_NEW_MR_CONFIG_ID
               value: "1" # Set to "1" to skip fetching mr_config_id for debugging
 
             - name: REDIS_ADDR
@@ -47,12 +47,21 @@ spec:
             - name: REMOTE_CA_FILE
               value: "/var/run/remote-cluster/ca.crt"
 
+            - name: POLICY_AGENT_TLS_CERT
+              value: "/var/run/tls/tls.crt"
+
+            - name: POLICY_AGENT_TLS_KEY
+              value: "/var/run/tls/tls.key"
+
           ports:
             - containerPort: 8443
 
           volumeMounts:
             - name: remote-cluster-cred
               mountPath: /var/run/remote-cluster
+              readOnly: true
+            - name: policy-agent-tls
+              mountPath: /var/run/tls
               readOnly: true
 
           resources:
@@ -67,6 +76,9 @@ spec:
         - name: remote-cluster-cred
           secret:
             secretName: remote-cluster-cred
+        - name: policy-agent-tls
+          secret:
+            secretName: policy-agent-tls
 ---
 apiVersion: v1
 kind: Service

@@ -22,7 +22,7 @@ type SessionData struct {
 	Nonce     string
 	TTL       time.Duration
 	SecretKey []byte
-	used      bool // whether the session has been used
+	Used      bool // whether the session has been used
 }
 
 /**
@@ -66,7 +66,7 @@ func SaveSessionData(data SessionData) error {
 	// Set TTL for the entire hash
 	_, err := rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 		// overwrite fields is allowed
-		if err := p.HSet(ctx, key, "nonce", data.Nonce, "secret_key", data.SecretKey, "used", data.used).Err(); err != nil {
+		if err := p.HSet(ctx, key, "nonce", data.Nonce, "secret_key", data.SecretKey, "used", data.Used).Err(); err != nil {
 			return err
 		}
 		// Set TTL for the session
@@ -127,7 +127,7 @@ func GetSessionData(sessionID string) (SessionData, error) {
 		Nonce:     nonce,
 		SecretKey: []byte(secret),
 		TTL:       ttl,
-		used:      m["used"] == "1" || m["used"] == "true",
+		Used:      m["used"] == "1" || m["used"] == "true",
 	}
 	return sessionData, nil
 }

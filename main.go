@@ -33,7 +33,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		session.Nonce = security.NewNonce()
 		session.SecretKey = security.NewSecretKey()
 		session.TTL = 1 * time.Minute // 1 minute
-		session.used = false
+		session.Used = false
 
 		// --- Save data in redis db ---
 		err := redis.SaveSessionData(session)
@@ -41,8 +41,8 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 			http.Error(w, "Failed to save session data: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Storing session in Redis successfully: ID=%s", session.ID)
-
+		log.Printf("Storing session in Redis successfully: ID=%s", session.ID[:8])
+		
 		// --- Store session.secretKey in Trustee ---
 		err = k8s.StoreSessionInTrustee(clients, r.Context(), session)
 		if err != nil {

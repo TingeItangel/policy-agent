@@ -177,6 +177,11 @@ func cleanupRoutine(clients *k8s.Clients) {
 		<-ticker.C
 		// Load all sessionIDs from redis (expired are automatically deleted by redis)
 		sessionIDs, err := redis.GetAllSessionIDs()
+		// If secret with pa-sessions not found, the error can be ignored and the cleanup can continue, because it means that there are no sessions stored in the trustee and thus no sessions to clean up.
+		if os.IsNotExist(err) {
+			log.Printf("No sessions found in trustee for cleanup")
+			continue
+		}
 		if err != nil {
 			log.Printf("Cleanup-Error: loading session IDs from Redis: %v", err)
 			continue

@@ -15,12 +15,15 @@ import (
 	"policy-agent/security"
 	"policy-agent/types"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"io"
 	"log"
 	"net/http"
 )
+
+var patchInFlight int64
 
 func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 	// --- Handle HTTP Methods ---
@@ -58,6 +61,9 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 
 	// --- POST /patch ---
 	case http.MethodPost:
+		atomic.AddInt64(&patchInFlight, +1) // increment patch in flight counter for monitoring
+		defer atomic.AddInt64(&patchInFlight, -1) // decrement patch in flight counter when done
+
 		var req types.PolicyRequest
 
 		req.Header.Nonce = r.Header.Get("X-Nonce")             // e.g. "cce471c3-1d85-4787-8299-f5c222c2a82f"
@@ -170,7 +176,6 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		// --- Return success ---
 		log.Println("✅Patch applied successfully")
 		w.Write([]byte("✅ Patched successfully\n"))
-
 	default:
 		log.Printf("Unsupported HTTP method: %s", r.Method)
 		http.Error(w, "Only GET or POST allowed", http.StatusMethodNotAllowed)
@@ -183,6 +188,10 @@ func cleanupRoutine(clients *k8s.Clients) {
 	defer ticker.Stop()
 
 	for {
+		if atomic.LoadInt64(&patchInFlight) > 0 {
+			log.Printf("Skipping cleanup because %d patch(es) are in flight", atomic.LoadInt64(&patchInFlight))
+			continue
+		}
 		<-ticker.C
 		// Load all sessionIDs from redis (expired are automatically deleted by redis)
 		sessionIDs, err := redis.GetAllSessionIDs()

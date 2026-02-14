@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
@@ -32,7 +33,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		session.ID = security.NewNonce()
 		session.Nonce = security.NewNonce()
 		session.SecretKey = security.NewSecretKey()
-		session.TTL = 1 * time.Minute // 1 minute
+		session.TTL = 2 * time.Minute // 2 minutes
 		session.Used = false
 
 		// --- Save data in redis db ---
@@ -79,14 +80,22 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 
 		// --- Check supported hash algorithm ---
 		algo := strings.ToUpper(req.Header.HashAlgo)
-		if algo != "SHA256" {
+		if algo != "SHA256" && algo != "SHA-512" {
 			http.Error(w, "unsupported X-Hash-Algorithm", http.StatusBadRequest)
 			return
 		}
 
 		// --- Validate Body Hash ---
-		sum := sha256.Sum256(data)
-		hashHex := hex.EncodeToString(sum[:])
+		var sum []byte
+		switch algo {
+		case "SHA256":
+			h := sha256.Sum256(data)
+			sum = h[:]
+		case "SHA-512":
+			h := sha512.Sum512(data)
+			sum = h[:]
+		}
+		hashHex := hex.EncodeToString(sum)
 		if !strings.EqualFold(hashHex, req.Header.HashValue) {
 			http.Error(w, "content hash mismatch", http.StatusUnauthorized)
 			return
@@ -105,23 +114,23 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		// Check if session is used
 		used, err := redis.IsSessionUsed(savedSession.ID)
 		if err != nil {
-			http.Error(w, "Failed to check session usage: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to check session usage in DB: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if used {
-			http.Error(w, "session already used", http.StatusUnauthorized)
+			http.Error(w, "Session already used", http.StatusUnauthorized)
 			return
 		}
 		// Mark session as used
 		err = redis.MarkSessionAsUsed(savedSession.ID)
 		if err != nil {
-			http.Error(w, "Failed to mark session as used: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to mark session as used in DB: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// Check TTL
 		if savedSession.TTL <= 0 { // Check TTL of Nonce
 			// Delete session data from Redis
-			_ = redis.DeleteSessionData(savedSession.ID)
+			//_ = redis.DeleteSessionData(savedSession.ID)
 			http.Error(w, "Session has expired", http.StatusUnauthorized)
 			return
 		}

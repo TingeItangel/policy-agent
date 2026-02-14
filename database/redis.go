@@ -141,7 +141,6 @@ func MarkSessionAsUsed(sessionID string) error {
 	}
 	key := "session:" + sessionID
 
-	// Set "used" field to true
 	if err := rdb.HSet(ctx, key, "used", true).Err(); err != nil {
 		return fmt.Errorf("failed to mark session as used: %w", err)
 	}

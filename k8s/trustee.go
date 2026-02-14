@@ -366,8 +366,6 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
         active[uuid] = struct{}{}
     }
 
-
-
 	secret, err := clients.Local.CoreV1().Secrets(ns).Get(
         ctx,
         secretName,

@@ -29,10 +29,13 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 	}
 	givenHMAC = strings.TrimSpace(givenHMAC)
 
-	// Remove scheme prefix if present
-	const scheme = "HMAC-SHA256 "
-	if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(scheme)) {
-		givenHMAC = strings.TrimSpace(givenHMAC[len(scheme):])
+	// Remove scheme prefix if present: shame "HMAC-SHA256 " or "HMAC-SHA256"
+	scheme := []string{"HMAC-SHA256 ", "HMAC-SHA256"}
+	for _, s := range scheme {
+		if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(s)) {
+			givenHMAC = strings.TrimSpace(givenHMAC[len(s):])
+			break
+		}
 	}
 
 	// Base64-signature decode
@@ -41,19 +44,13 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 		return fmt.Errorf("bad signature encoding: %w", err)
 	}
 
-	// Normalize secret key
-	keyRaw, err := normalizeKey(secretKey)
-	if err != nil {
-		return fmt.Errorf("normalize key: %w", err)
-	}
-
 	sum := sha256.Sum256(body)
 	hashHex := hex.EncodeToString(sum[:])
 
 	msg := hashHex + "." + nonce
 
 	// calculate HMAC
-	mac := hmac.New(sha256.New, keyRaw)
+	mac := hmac.New(sha256.New, secretKey)
 	mac.Write([]byte(msg))
 	expected := mac.Sum(nil)
 

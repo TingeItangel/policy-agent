@@ -351,8 +351,6 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 		return "", fmt.Errorf("failed to parse JWT payload JSON: %w", err)
 	}
 
-	log.Printf("%s", string(payloadJSON))
-
 	mr := strings.TrimSpace(payload.Submods.CPU.
 		EarVeraisonAnnotatedEvidence.TDX.
 		Quote.Body.MrConfigID)

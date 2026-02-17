@@ -60,22 +60,6 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 	return nil
 }
 
-/**
-* Compare HashValue of Request Body and own calculation
-* returns true if hashes are same, false if not
- */
-// func CompareHash(data []byte, hashAlgo string, hashValue string) bool {
-// 	// Calculate own hash over body
-// 	calculatedHash, err := calculateHash(data, hashAlgo)
-// 	if err != nil {
-// 		return false
-// 	}
-// 	// Compare calculated hash with the received one
-// 	if !strings.EqualFold(calculatedHash, hashValue) {
-// 		return false
-// 	}
-// 	return true
-// }
 
 // ---------- Internal Functions ----------
 

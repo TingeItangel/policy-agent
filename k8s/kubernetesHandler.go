@@ -324,8 +324,8 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 	payloadB64 := parts[1]
 
 	// NOTE: JWT base64url encoding may omit padding, but Go's base64 decoder requires it
-	if l := len(payloadB64) % 4; l != 0 {
-		payloadB64 += strings.Repeat("=", 4-l)
+	if length := len(payloadB64) % 4; length != 0 {
+		payloadB64 += strings.Repeat("=", 4-length)
 	}
 	payloadJSON, err := base64.URLEncoding.DecodeString(payloadB64)
 
@@ -351,6 +351,8 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 		return "", fmt.Errorf("failed to parse JWT payload JSON: %w", err)
 	}
+
+	log.Printf("%s", string(payloadJSON))
 
 	mr := strings.TrimSpace(payload.Submods.CPU.
 		EarVeraisonAnnotatedEvidence.TDX.

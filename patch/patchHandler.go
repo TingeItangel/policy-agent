@@ -27,6 +27,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	// --- Preparation ---
 	// --- Get current mr_config_id from  running deployment ---
 	oldMrConfigId, err := k8s.GetMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
+	log.Printf("Current config_mr value obtained from remote cluster: %s", oldMrConfigId)
 	if err != nil {
 		http.Error(w, "Failed to get current mr_config_id from remote cluster: "+err.Error(), http.StatusBadRequest)
 		return

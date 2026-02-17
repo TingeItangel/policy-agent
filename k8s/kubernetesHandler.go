@@ -351,16 +351,16 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 		return "", fmt.Errorf("failed to parse JWT payload JSON: %w", err)
 	}
 
-	mr := strings.TrimSpace(payload.Submods.CPU.
+	mrConfigId := strings.ToLower(strings.TrimSpace(payload.Submods.CPU.
 		EarVeraisonAnnotatedEvidence.TDX.
-		Quote.Body.MrConfigID)
+		Quote.Body.MrConfigID))
 
-	if mr == "" {
+	if mrConfigId == "" {
 		return "", fmt.Errorf("mr_config_id empty")
 	}
 
-	log.Printf("Retrieved mr_config_id: %s", mr)
-	return mr, nil
+	log.Printf("Retrieved mr_config_id: %s", mrConfigId)
+	return mrConfigId, nil
 }
 
 // ---------- Internal Functions ----------

@@ -130,6 +130,11 @@ func StoreSessionInTrustee(clients *Clients, ctx context.Context, session redis.
 	return nil
 }
 
+/**
+* DeleteTrusteeSession removes the session data for the given session from the Trustee cluster.
+* It deletes the corresponding key from the k8s secret and, if the secret becomes empty, deletes the secret itself.
+* If the secret is deleted, it also updates the KbsConfig CR to remove the reference to the deleted secret.
+*/
 func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 	kbsNamespace := os.Getenv("KBS_NAMESPACE")
 	if kbsNamespace == "" {
@@ -295,14 +300,15 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 
 			for _, value := range list[i].Value {
 				// Drop entries with oldMrConfigId; keep everything else
-				if value == oldMrConfigId {
+				val := strings.ToLower(strings.TrimSpace(value))
+				if val == oldMrConfigId {
 					foundOld = true
 					continue
 				}
-				if value == newMrConfigId {
+				if val == newMrConfigId {
 					hasNew = true
 				}
-				newSlice = append(newSlice, value)
+				newSlice = append(newSlice, val)
 			}
 
 			// Add the new mr_config_id value if it is not present yet
@@ -319,7 +325,17 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 
 		if !foundOld {
 			// Explicitly signal that the given oldMrConfigId does not exist
-			log.Printf("⚠️  warning: oldMrConfigId not found in ConfigMap %s/%s", rvpsNamespace, configMapName)
+			//log.Printf("⚠️  warning: oldMrConfigId not found in ConfigMap %s/%s", rvpsNamespace, configMapName)
+			log.Printf("oldMrConfigId not found; old=%q (len=%d)", oldMrConfigId, len(oldMrConfigId))
+			// NOTE: DEbugging output to find close matches in case of formatting issues (e.g. whitespace, case sensitivity)
+			for _, refVal := range list {
+				if refVal.Name != "mr_config_id" { continue }
+				for _, value := range refVal.Value {
+					if strings.Contains(value, oldMrConfigId) || strings.Contains(oldMrConfigId, value) {
+						log.Printf("close match candidate: value=%q (len=%d)", value, len(value))
+					}
+				}
+			}
 			// NOTE: old value might not be present, so we do not error out here.
 		}
 

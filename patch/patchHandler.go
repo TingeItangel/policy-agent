@@ -22,22 +22,20 @@ import (
 * the initData annotation, updates the policy.rego according to the request body,
 * re-encrypts the initData, and applies the updated annotation back to the deployment.
  */
-func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyRequest) {
+func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyRequest) error {
 
 	// --- Preparation ---
 	// --- Get current mr_config_id from  running deployment ---
 	oldMrConfigId, err := k8s.GetMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
-	log.Printf("Current config_mr value obtained from remote cluster: %s", oldMrConfigId)
+	log.Printf("Old config_mr value obtained from remote cluster: %s", oldMrConfigId)
 	if err != nil {
-		http.Error(w, "Failed to get current mr_config_id from remote cluster: "+err.Error(), http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to get old mr_config_id from remote cluster: %w", err)
 	}
 
 	// find Deployment in the remote cluster
 	deployment, err := k8s.GetDeploymentFromCluster(clients.Remote, req)
 	if err != nil {
-		http.Error(w, "Failed to find deployment in remote cluster", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to find deployment in remote cluster: %w", err)
 	}
 	log.Printf("Deployment found in remote cluster: %s/%s", req.Body.Namespace, req.Body.DeploymentName)
 
@@ -47,35 +45,30 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	b64InitData, err := k8s.GetInitDataFromAnnotation(deployment)
 	if err != nil {
 		log.Printf("Error getting initData annotation: %v", err)
-		http.Error(w, "Failed to get initData annotation from deployment", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to get initData annotation from deployment: %w", err)
 	}
 	// Decrypt base64 annotation value
 	initData, err := security.DecryptBase64(b64InitData)
 	if err != nil {
-		http.Error(w, "Policy Data can not be read", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to decrypt initData: %w", err)
 	}
 
 	// Parse TOML into a generic map
 	var parsed map[string]interface{}
 	if err := toml.Unmarshal([]byte(initData), &parsed); err != nil {
-		http.Error(w, "Failed to parse initData as TOML", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to parse initData as TOML: %w", err)
 	}
 
 	// Extract [data] section
 	dataSection, ok := parsed["data"].(map[string]interface{})
 	if !ok {
-		http.Error(w, "initData missing [data] section", http.StatusBadRequest)
-		return
+		return fmt.Errorf("initData missing [data] section")
 	}
 
 	// Extract "policy.rego" from [data] section
 	policyRego, ok := dataSection["policy.rego"].(string)
 	if !ok {
-		http.Error(w, "initData missing policy.rego", http.StatusBadRequest)
-		return
+		return fmt.Errorf("initData missing policy.rego")
 	}
 	log.Printf("✅ Extracted policy.rego from initData successfully")
 
@@ -83,8 +76,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Starting policy update for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
 	updatedRego, err := updatePolicyData(policyRego, req.Body)
 	if err != nil {
-		http.Error(w, "Failed to update policy data", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to update policy data: %w", err)
 	}
 
 	// Replace policy.rego with the updated one
@@ -92,15 +84,13 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 
 	newInitDataToml, err := buildInitDataToml(parsed, dataSection)
 	if err != nil {
-		http.Error(w, "Failed to rebuild initData TOML", http.StatusInternalServerError)
-		return
+		return fmt.Errorf("failed to rebuild initData TOML: %w", err)
 	}
 
 	// Encode base64 and gzip again
 	newB64InitData, err := security.EncryptBase64(newInitDataToml)
 	if err != nil {
-		http.Error(w, "Failed encrypt the new initdata in base64", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to encrypt new initData in base64: %w", err)
 	}
 	log.Printf("✅ Updated and Re-encrypted updated initData successfully")
 
@@ -108,8 +98,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Applying updated initData annotation to deployment %s/%s in remote cluster", req.Body.Namespace, req.Body.DeploymentName)
 	err = k8s.UpdateAnnotationValue(clients.Remote, deployment, newB64InitData, req.Body.Namespace)
 	if err != nil {
-		http.Error(w, "Failed to apply patch to remote cluster", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to apply patch to remote cluster: %w", err)
 	}
 	log.Printf("✅ Patch applied successfully to deployment %s/%s in remote cluster", req.Body.Namespace, req.Body.DeploymentName)
 
@@ -117,8 +106,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Waiting for deployment %s/%s rollout to complete", req.Body.Namespace, req.Body.DeploymentName)
 	err = k8s.WaitForDeploymentRollout(clients.Remote, req.Body.Namespace, req.Body.DeploymentName, 2*time.Minute)
 	if err != nil {
-		http.Error(w, "Timed out waiting for deployment rollout", http.StatusBadRequest)
-		return
+		return fmt.Errorf("timed out waiting for deployment rollout: %w", err)
 	}
 	log.Printf("✅ Deployment %s/%s rollout completed successfully", req.Body.Namespace, req.Body.DeploymentName)
 
@@ -126,8 +114,7 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Getting new config_mr value from remote cluster for deployment %s/%s", req.Body.Namespace, req.Body.DeploymentName)
 	newMrConfigId, err := k8s.GetMrConfigId(clients, req.Body.DeploymentName, req.Body.Namespace)
 	if err != nil {
-		http.Error(w, "Failed to get new config_mr from remote cluster", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to get new config_mr from remote cluster: %w", err)
 	}
 	// shorten log output for readability and security
 	log.Printf("Obtained new config_mr value: %s", newMrConfigId[:12]+"...")
@@ -136,11 +123,11 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	log.Printf("Patching reference values in trustee")
 	err = k8s.UpdateReferenceValues(clients, newMrConfigId, oldMrConfigId)
 	if err != nil {
-		http.Error(w, "Can not patch the reference values in trustee", http.StatusBadRequest)
-		return
+		return fmt.Errorf("failed to patch reference values in trustee: %w", err)
 	}
 	log.Printf("✅ Reference values in trustee patched successfully")
 	// NOTE: k8s restarts pods automatically: see kubectl describe deployment <name> -n <namespace>
+	return nil
 }
 
 // ---------- Internal Functions ----------

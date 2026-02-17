@@ -270,8 +270,7 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 	pod := pods.Items[0].Name
 	log.Printf("Using pod %s to get mr_config_id", pod)
 
-	// Get Token command
-	// NOTE: This command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value
+	// NOTE: This Token command must be allowed in the kata-policy of the CoCo deployment in the remote cluster to get new mr_config_id value
 	cmd := []string{
 		"curl", "-s", "http://127.0.0.1:8006/aa/token?token_type=kbs",
 	}

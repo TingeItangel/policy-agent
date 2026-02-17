@@ -189,7 +189,7 @@ func cleanupRoutine(clients *k8s.Clients) {
 
 	for {
 		if atomic.LoadInt64(&patchInFlight) > 0 {
-			log.Printf("Skipping cleanup because %d patch(es) are in flight", atomic.LoadInt64(&patchInFlight))
+			// log.Printf("Skipping cleanup because %d patch(es) are in flight", atomic.LoadInt64(&patchInFlight))
 			// sleep for a short time to allow the patch to complete and avoid potential conflicts with session deletion
 			time.Sleep(30 * time.Second)
 			continue

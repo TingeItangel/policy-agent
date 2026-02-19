@@ -1,0 +1,81 @@
+# Service Account and RBAC for policy-agent in remote cluster
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-agent-sa
+  namespace: default
+---
+# PolicyAgent Role to read its own ServiceAccount info (REMOTE CLUSTER)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: policy-agent-self-read
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: policy-agent-self-read-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: policy-agent-sa
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: policy-agent-self-read
+---
+# Role to read and patch Deployments in target namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default # or target namespace
+  name: patcher-role
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: patcher-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: policy-agent-sa
+    namespace: default
+roleRef:
+  kind: Role
+  name: patcher-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role to read and exec Pods in target namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-reader-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: policy-agent-sa
+    namespace: default
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: pod-reader

@@ -28,20 +28,19 @@ func VerifyHMAC(hashHex string, nonce string, givenHMAC string, secretKey []byte
 	if nonce == "" {
 		return fmt.Errorf("empty nonce")
 	}
+	trimmedGivenHMAC := strings.TrimSpace(givenHMAC)
 
-	givenHMAC = strings.TrimSpace(givenHMAC)
-
-	// Remove scheme prefix if present: shame "HMAC-SHA256 " or "HMAC-SHA256"
+	// Remove scheme prefix if present: shame "HMAC-SHA256 " or "HMAC-SHA512"
 	scheme := []string{"HMAC-SHA256 ", "HMAC-SHA512"}
 	for _, s := range scheme {
-		if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(s)) {
-			givenHMAC = strings.TrimSpace(givenHMAC[len(s):])
+		if strings.HasPrefix(strings.ToUpper(trimmedGivenHMAC), strings.ToUpper(s)) {
+			trimmedGivenHMAC = strings.TrimSpace(trimmedGivenHMAC[len(s):])
 			break
 		}
 	}
 
 	// Base64-signature decode
-	givenSig, err := base64.StdEncoding.DecodeString(givenHMAC)
+	givenSig, err := base64.StdEncoding.DecodeString(trimmedGivenHMAC)
 	if err != nil {
 		return fmt.Errorf("bad signature encoding: %w", err)
 	}
@@ -63,6 +62,9 @@ func VerifyHMAC(hashHex string, nonce string, givenHMAC string, secretKey []byte
 
 	if !hmac.Equal(givenSig, expected) {
 		// Log Bytes for Debugging
+		log.Printf("givenHMAC before normalization: '%s'", givenHMAC)
+		log.Printf("givenHMAC after trimming: '%s'", trimmedGivenHMAC)
+		log.Printf("Secret Key (hex): %s", hex.EncodeToString(secretKey))
 		log.Printf("Message: %s", msg)
 		log.Printf("Expected HMAC (hex): %s", hex.EncodeToString(expected))
 		log.Printf("Given HMAC (hex): %s", hex.EncodeToString(givenSig))

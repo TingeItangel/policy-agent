@@ -28,6 +28,7 @@ credentials
 *.pem
 *.key
 /tmp/*
+/deployments/*
 
 # Node
 node_modules/

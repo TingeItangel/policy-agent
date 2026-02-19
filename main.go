@@ -150,7 +150,7 @@ func handler(w http.ResponseWriter, r *http.Request, clients *k8s.Clients) {
 		}
 
 		// --- HMAC Verification ---
-		err = security.VerifyHMAC(data, req.Header.Nonce, req.Header.HMAC, savedSession.SecretKey)
+		err = security.VerifyHMAC(hashHex, req.Header.Nonce, req.Header.HMAC, savedSession.SecretKey, req.Header.HashAlgo)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return

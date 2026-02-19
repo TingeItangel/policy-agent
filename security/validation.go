@@ -10,27 +10,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"log"
 	"strings"
 	"unicode"
 )
 
 /**
 * checks that HMAC(sha256(body) + "." + nonce, secretKey) == givenHMAC
-* payloadHash = SHA256(body)
-* message = payloadHash + "." + nonce
+* hashHex is the own calculated hash of the body (e.g. SHA256(body)) in hex string format
+* message = hashHex + "." + nonce
 * expectedHMAC = Base64Encode( HMAC-SHA256(message, secretKey) )
  */
-func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) error {
+func VerifyHMAC(hashHex string, nonce string, givenHMAC string, secretKey []byte, algo string) error {
 	if len(secretKey) == 0 {
 		return fmt.Errorf("empty secret key")
 	}
 	if nonce == "" {
 		return fmt.Errorf("empty nonce")
 	}
+
 	givenHMAC = strings.TrimSpace(givenHMAC)
 
 	// Remove scheme prefix if present: shame "HMAC-SHA256 " or "HMAC-SHA256"
-	scheme := []string{"HMAC-SHA256 ", "HMAC-SHA256"}
+	scheme := []string{"HMAC-SHA256 ", "HMAC-SHA512"}
 	for _, s := range scheme {
 		if strings.HasPrefix(strings.ToUpper(givenHMAC), strings.ToUpper(s)) {
 			givenHMAC = strings.TrimSpace(givenHMAC[len(s):])
@@ -44,17 +46,27 @@ func VerifyHMAC(body []byte, nonce string, givenHMAC string, secretKey []byte) e
 		return fmt.Errorf("bad signature encoding: %w", err)
 	}
 
-	sum := sha256.Sum256(body)
-	hashHex := hex.EncodeToString(sum[:])
-
 	msg := hashHex + "." + nonce
 
 	// calculate HMAC
-	mac := hmac.New(sha256.New, secretKey)
+	var mac hash.Hash
+	switch strings.ToUpper(algo) {
+	case "SHA256":
+		mac = hmac.New(sha256.New, secretKey)
+	case "SHA512":
+		mac = hmac.New(sha512.New, secretKey)
+	default:
+		return fmt.Errorf("unsupported HMAC algorithm: %s", algo)
+	}
 	mac.Write([]byte(msg))
 	expected := mac.Sum(nil)
 
 	if !hmac.Equal(givenSig, expected) {
+		// Log Bytes for Debugging
+		log.Printf("Message: %s", msg)
+		log.Printf("Expected HMAC (hex): %s", hex.EncodeToString(expected))
+		log.Printf("Given HMAC (hex): %s", hex.EncodeToString(givenSig))
+
 		return fmt.Errorf("invalid signature")
 	}
 	return nil

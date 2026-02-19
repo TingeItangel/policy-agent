@@ -65,7 +65,7 @@ func InitClients() (*Clients, error) {
 /**
 * Check if ServiceAccount exists in the given namespace for the provided client.
 * ServiceAccount are needed for the policy-agent to interact with the clusters.
-* local cluster: to manage trustee ConfigMaps and Secrets and reference values
+* local cluster: to manage Trustee ConfigMaps and Secrets and reference values
 * remote cluster: to patch deployments with updated annotations
 * Returns an error if the ServiceAccount does not exist or if the check fails.
  */
@@ -259,7 +259,6 @@ func WaitForDeploymentRollout(
  */
 func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, error) {
 	ctx := context.Background()
-	log.Printf("Getting mr_config_id from remote cluster for deployment %s in namespace %s", deploymentName, namespace)
 	pods, err := clients.Remote.CoreV1().Pods(namespace).List(ctx, v1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
 	})
@@ -358,8 +357,6 @@ func GetMrConfigId(clients *Clients, deploymentName, namespace string) (string, 
 	if mrConfigId == "" {
 		return "", fmt.Errorf("mr_config_id empty")
 	}
-
-	log.Printf("Retrieved mr_config_id: %s", mrConfigId)
 	return mrConfigId, nil
 }
 
@@ -492,33 +489,13 @@ func PingAPI(ctx context.Context, clients *Clients) error {
 	if err != nil {
 		return fmt.Errorf("api not reachable: %w", err)
 	}
-	fmt.Printf("Connected, version: %s\n", ver.GitVersion)
+	log.Printf("Connected, version: %s\n", ver.GitVersion)
 
 	// Ping remote cluster
 	ver, err = clients.Remote.ServerVersion()
 	if err != nil {
 		return fmt.Errorf("remote api not reachable: %w", err)
 	}
-	fmt.Printf("Connected to remote, version: %s\n", ver.GitVersion)
-
-	// ##########################################
-	// DEBUG Ping remote cluster to verify connectivity
-	// ##########################################
-
-	// deployments, err := clients.Local.AppsV1().Deployments("default").List(ctx, v1.ListOptions{})
-	// if err != nil { return fmt.Errorf("list deployments default: %w", err) }
-	// fmt.Printf("Found %d deployments in default\n", len(deployments.Items))
-
-	// log.Printf("InitClients final: remoteTokenLen=%d remoteHost=%s",
-	// 	len(clients.RemoteCfg.BearerToken),
-	// 	clients.RemoteCfg.Host,
-	// )
-
-	// pods, err := clients.Remote.CoreV1().Pods("default").List(ctx, v1.ListOptions{})
-	// if err != nil { return fmt.Errorf("list pods default: %w", err) }
-	// fmt.Printf("Found %d pods in default\n", len(pods.Items))
-
-	// END DEBUG Ping remote cluster to verify connectivity
-
+	log.Printf("Connected to remote, version: %s\n", ver.GitVersion)
 	return nil
 }

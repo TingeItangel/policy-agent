@@ -119,13 +119,13 @@ func PatchHandler(clients *k8s.Clients, w http.ResponseWriter, req types.PolicyR
 	// shorten log output for readability and security
 	log.Printf("Obtained new config_mr value: %s", newMrConfigId[:12]+"...")
 
-	// --- Patch reference values in trustee ---
-	log.Printf("Patching reference values in trustee")
+	// --- Patch reference values in Trustee ---
+	log.Printf("Patching reference values in Trustee")
 	err = k8s.UpdateReferenceValues(clients, newMrConfigId, oldMrConfigId)
 	if err != nil {
-		return fmt.Errorf("failed to patch reference values in trustee: %w", err)
+		return fmt.Errorf("failed to patch reference values in Trustee: %w", err)
 	}
-	log.Printf("✅ Reference values in trustee patched successfully")
+	log.Printf("✅ Reference values in Trustee patched successfully")
 	// NOTE: k8s restarts pods automatically: see kubectl describe deployment <name> -n <namespace>
 	return nil
 }

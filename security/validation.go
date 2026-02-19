@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"log"
 	"strings"
 	"unicode"
 )
@@ -61,14 +60,6 @@ func VerifyHMAC(hashHex string, nonce string, givenHMAC string, secretKey []byte
 	expected := mac.Sum(nil)
 
 	if !hmac.Equal(givenSig, expected) {
-		// Log Bytes for Debugging
-		log.Printf("givenHMAC before normalization: '%s'", givenHMAC)
-		log.Printf("givenHMAC after trimming: '%s'", trimmedGivenHMAC)
-		log.Printf("Secret Key (hex): %s", hex.EncodeToString(secretKey))
-		log.Printf("Message: %s", msg)
-		log.Printf("Expected HMAC (hex): %s", hex.EncodeToString(expected))
-		log.Printf("Given HMAC (hex): %s", hex.EncodeToString(givenSig))
-
 		return fmt.Errorf("invalid signature")
 	}
 	return nil

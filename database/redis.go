@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -81,7 +80,6 @@ func SaveSessionData(data SessionData) error {
 		return fmt.Errorf("failed to save session data: %w", err)
 	}
 
-	log.Printf("session %s saved (ttl=%s)", data.ID, data.TTL)
 	return nil
 }
 

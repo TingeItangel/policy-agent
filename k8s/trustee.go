@@ -63,7 +63,7 @@ func StoreSessionInTrustee(clients *Clients, ctx context.Context, session redis.
 			}
 			_, err = secrets.Create(ctx, sec, metav1.CreateOptions{})
 			if err == nil {
-				log.Printf("✅ created secret %s/%s with key %q", kbsNamespace, secretName, keyName)
+				log.Printf("Created secret %s/%s with key %q...", kbsNamespace, secretName, keyName[:8])
 			}
 			return err
 		}
@@ -79,7 +79,7 @@ func StoreSessionInTrustee(clients *Clients, ctx context.Context, session redis.
 
 		_, err = secrets.Update(ctx, existing, metav1.UpdateOptions{})
 		if err == nil {
-			log.Printf("🔄 upserted key %q in secret %s/%s", keyName, kbsNamespace, secretName)
+			log.Printf("Added key %q in existing secret %s/%s", keyName[:8], kbsNamespace, secretName)
 		}
 		return err
 	})
@@ -124,7 +124,7 @@ func StoreSessionInTrustee(clients *Clients, ctx context.Context, session redis.
 		if _, err := dyn.Resource(gvr).Namespace(kbsNamespace).Update(ctx, u, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("update KbsConfig %s/%s: %w", kbsNamespace, kbsCfgName, err)
 		}
-		log.Printf("✅ registered secret %q in KbsConfig %s/%s", secretName, kbsNamespace, kbsCfgName)
+		log.Printf("Registered secret %q in KbsConfig %s/%s", secretName[:8], kbsNamespace, kbsCfgName)
 	}
 
 	return nil
@@ -176,7 +176,7 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 				return fmt.Errorf("🗑️ delete empty secret %s/%s: %w", kbsNamespace, secretName, err)
 			}
 			deletedSecret = true
-			log.Printf("🗑️ deleted empty secret %s/%s", kbsNamespace, secretName)
+			log.Printf("🗑️ Deleted empty secret %s/%s", kbsNamespace, secretName)
 			return nil
 		}
 
@@ -184,7 +184,7 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 		if _, err := secrets.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("update secret %s/%s: %w", kbsNamespace, secretName, err)
 		}
-		log.Printf("🗑️ removed key %q from secret %s/%s", keyName, kbsNamespace, secretName)
+		log.Printf("🗑️ Removed key %q... from secret %s/%s", keyName[:8], kbsNamespace, secretName)
 		return nil
 	})
 	if err != nil {
@@ -234,7 +234,7 @@ func DeleteTrusteeSession(clients *Clients, session redis.SessionData) error {
 			if _, err := dyn.Resource(gvr).Namespace(kbsNamespace).Update(ctx, u, metav1.UpdateOptions{}); err != nil {
 				return fmt.Errorf("update KbsConfig %s/%s: %w", kbsNamespace, kbsCfgName, err)
 			}
-			log.Printf("🗑️ removed secret %q from KbsConfig %s/%s", secretName, kbsNamespace, kbsCfgName)
+			log.Printf("🗑️ Removed secret %q from KbsConfig %s/%s", secretName[:8], kbsNamespace, kbsCfgName)
 		}
 	}
 	return nil
@@ -325,17 +325,7 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 
 		if !foundOld {
 			// Explicitly signal that the given oldMrConfigId does not exist
-			//log.Printf("⚠️  warning: oldMrConfigId not found in ConfigMap %s/%s", rvpsNamespace, configMapName)
-			log.Printf("oldMrConfigId not found; old=%q (len=%d)", oldMrConfigId, len(oldMrConfigId))
-			// NOTE: DEbugging output to find close matches in case of formatting issues (e.g. whitespace, case sensitivity)
-			for _, refVal := range list {
-				if refVal.Name != "mr_config_id" { continue }
-				for _, value := range refVal.Value {
-					if strings.Contains(value, oldMrConfigId) || strings.Contains(oldMrConfigId, value) {
-						log.Printf("close match candidate: value=%q (len=%d)", value, len(value))
-					}
-				}
-			}
+			log.Printf("oldMrConfigId not found; old=%q...", oldMrConfigId[:8])
 			// NOTE: old value might not be present, so we do not error out here.
 		}
 
@@ -353,7 +343,7 @@ func UpdateReferenceValues(clients *Clients, newMrConfigId, oldMrConfigId string
 			return fmt.Errorf("update ConfigMap %s/%s: %w", rvpsNamespace, configMapName, err)
 		}
 
-		log.Printf("✅ updated mr_config_id in ConfigMap %s/%s", rvpsNamespace, configMapName)
+		log.Printf("✅ Updated mr_config_id in ConfigMap %s/%s", rvpsNamespace, configMapName)
 		return nil
 	})
 	if err != nil {
@@ -401,7 +391,7 @@ func DeleteExpiredSessions(clients *Clients, redisKeys []string) (error) {
     // secret.Data ist map[string][]byte
     for key := range secret.Data {
         if _, ok := active[key]; !ok {
-            log.Printf("🗑️ removing expired session from secret: %s", key)
+            log.Printf("🗑️ Removing expired session from secret: %s", key)
             delete(secret.Data, key)
             changed = true
         }

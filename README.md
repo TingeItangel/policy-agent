@@ -145,9 +145,9 @@ The Policy-Agent can only patch Deployments if the initdata file contains such a
 
 ## Local Cluster
 
-### 1. Policy-Agent-RBAC anlegen
+### 1. Policy-Agent-RBAC
 
-- Trustee-Namespace adjustment (z. B. `confidential-containers-system` oder `operators`)
+- Trustee-Namespace adjustment (z. B. `confidential-containers-system` or `operators`)
 - `kubectl apply -f ./deployments/rbac-trusted-cluster.yaml`
 
 ### 2. Create Secrets in lokal Cluster for Policy-Agent
@@ -182,8 +182,8 @@ kubectl -n policy-agent create secret tls policy-agent-tls --cert=/tmp/server.cr
 ```bash
 kubectl create secret docker-registry dockerhub-cred \
   --docker-server=https://index.docker.io/v1/ \
-  --docker-username=<DEIN_DOCKERHUB_USERNAME> \
-  --docker-password='<DEIN_DOCKERHUB_TOKEN_ODER_PASSWORT>' \
+  --docker-username=<DOCKERHUB_USERNAME> \
+  --docker-password='<DOCKERHUB_TOKEN_OD_PASSWORD>' \
   --docker-email='dummy@example.com' \
   --namespace=policy-agent
 ```
@@ -191,7 +191,7 @@ kubectl create secret docker-registry dockerhub-cred \
 ### 3. Policy-Agent-Deployment erstellen
 
 - `kubectl apply -f ./deployments/policy-agent-deployment.yaml`
-- **WICHTIG**: `ENV` Variables must be set in the Deployment file:
+- **IMPORTANT**: `ENV` Variables must be set in the Deployment file:
   - `KBS_NAMESPACE`: namespace where trustee is deployed (e.g. `confidential-containers-system` oder `operators`)
   - `KBS_CONFIG_NAME`: name of the ConfigMap in the trustee where the reference values are stored (e.g. `policy-agent-reference-values`)
   - `REDIS_ADDR`: Redis address (e.g. `redis:6379` if using the provided Redis Deployment)
